@@ -1,0 +1,12 @@
+{
+  "name": "broker-crm",
+  "version": "1.0.0",
+  "scripts": {
+    "digest": "node scripts/weekly-digest.js",
+    "digest:dry": "node scripts/weekly-digest.js --dry-run"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "resend": "^4.0.0"
+  }
+}

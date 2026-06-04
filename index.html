@@ -339,6 +339,7 @@
   <div class="brand">BROKER<em>CRM</em></div>
   <div class="header-right">
     <button class="btn btn-outline" id="btn-thresholds">⚙ Thresholds</button>
+    <button class="btn btn-outline" id="btn-digest">✉ Digest</button>
     <button class="btn btn-outline" id="btn-import">↑ Import CSV</button>
     <button class="btn btn-outline" id="btn-export">↓ Export CSV</button>
     <button class="btn-ghost" id="btn-theme" title="Toggle theme">☾</button>
@@ -498,6 +499,39 @@
   </div>
 </div>
 
+<!-- ── Digest modal ───────────────────────────────────────────── -->
+<div class="modal-backdrop" id="digest-modal" style="display:none">
+  <div class="modal" style="width:440px">
+    <div class="modal-hdr">
+      <div class="modal-title">Weekly Digest</div>
+      <button class="modal-x" id="digest-close">×</button>
+    </div>
+
+    <div style="margin-bottom:20px">
+      <label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px">Recipients</label>
+      <div id="digest-email-list" style="margin-bottom:8px"></div>
+      <div style="display:flex;gap:6px">
+        <input type="text" id="digest-add-input" placeholder="email@example.com"
+          style="flex:1;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:var(--font);font-size:12px">
+        <button class="btn btn-outline" id="digest-add-btn" style="white-space:nowrap">+ Add</button>
+      </div>
+    </div>
+
+    <div>
+      <label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px">Auto-Sync File</label>
+      <div id="digest-sync-status" style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Not configured</div>
+      <button class="btn btn-outline" id="digest-sync-btn">Set Sync File</button>
+      <p style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">
+        Picks a local JSON file to keep in sync. The weekly digest script reads this file — save it anywhere (e.g. your project folder).
+      </p>
+    </div>
+
+    <div class="form-footer">
+      <button class="btn btn-outline" id="digest-cancel">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Hidden CSV file input -->
 <input type="file" id="csv-input" accept=".csv,.txt">
 
@@ -509,11 +543,16 @@
 const BROKERS_KEY    = 'broker-crm-v1';
 const THRESH_KEY     = 'broker-crm-thresholds-v1';
 const THEME_KEY      = 'broker-crm-theme';
+const DIGEST_KEY     = 'broker-crm-digest-v1';
 const DEFAULT_THRESH = { 1: 14, 2: 30, 3: 60 };
+const IDB_DB         = 'broker-crm-idb';
+const IDB_STORE      = 'handles';
 
 // ── State ─────────────────────────────────────────────────────
-let brokers    = [];
-let thresholds = Object.assign({}, DEFAULT_THRESH);
+let brokers        = [];
+let thresholds     = Object.assign({}, DEFAULT_THRESH);
+let digestSettings = { emails: [] };
+let syncFileHandle = null;
 let search     = '';
 let filterTier = '';
 let filterSt   = '';
@@ -522,12 +561,15 @@ let filterSt   = '';
 function loadAll() {
   try { brokers = JSON.parse(localStorage.getItem(BROKERS_KEY)) || []; } catch(e) { brokers = []; }
   try { thresholds = Object.assign({}, DEFAULT_THRESH, JSON.parse(localStorage.getItem(THRESH_KEY))); } catch(e) {}
+  try { digestSettings = Object.assign({ emails: [] }, JSON.parse(localStorage.getItem(DIGEST_KEY))); } catch(e) {}
   const theme = localStorage.getItem(THEME_KEY) || 'dark';
   document.documentElement.setAttribute('data-theme', theme);
   document.getElementById('btn-theme').textContent = theme === 'dark' ? '☾' : '☀';
+  idbLoadHandle().then(h => { syncFileHandle = h || null; });
 }
-function saveBrokers()    { localStorage.setItem(BROKERS_KEY, JSON.stringify(brokers)); }
-function saveThresholds() { localStorage.setItem(THRESH_KEY,  JSON.stringify(thresholds)); }
+function saveBrokers()    { localStorage.setItem(BROKERS_KEY, JSON.stringify(brokers)); syncToFile(); }
+function saveThresholds() { localStorage.setItem(THRESH_KEY,  JSON.stringify(thresholds)); syncToFile(); }
+function saveDigest()     { localStorage.setItem(DIGEST_KEY,  JSON.stringify(digestSettings)); syncToFile(); }
 
 // ── Helpers ───────────────────────────────────────────────────
 function uuid() {
@@ -856,6 +898,137 @@ document.addEventListener('keydown', e => {
     if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
     openBrokerModal(null);
   }
+});
+
+// ── IndexedDB helpers (persists FileSystemFileHandle) ─────────
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(IDB_DB, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
+    req.onsuccess = e => res(e.target.result);
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+async function idbLoadHandle() {
+  try {
+    const db = await idbOpen();
+    return new Promise((res, rej) => {
+      const tx  = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get('syncFile');
+      req.onsuccess = e => res(e.target.result || null);
+      req.onerror   = e => rej(e.target.error);
+    });
+  } catch(e) { return null; }
+}
+async function idbSaveHandle(handle) {
+  try {
+    const db = await idbOpen();
+    return new Promise((res, rej) => {
+      const tx  = db.transaction(IDB_STORE, 'readwrite');
+      const req = tx.objectStore(IDB_STORE).put(handle, 'syncFile');
+      req.onsuccess = () => res();
+      req.onerror   = e => rej(e.target.error);
+    });
+  } catch(e) {}
+}
+
+// ── File sync ─────────────────────────────────────────────────
+async function syncToFile() {
+  if (!syncFileHandle) return;
+  try {
+    const perm = await syncFileHandle.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') return;
+    const writable = await syncFileHandle.createWritable();
+    await writable.write(JSON.stringify({
+      brokers,
+      thresholds,
+      digestEmails: digestSettings.emails,
+      exportedAt: new Date().toISOString(),
+    }, null, 2));
+    await writable.close();
+  } catch(e) { console.warn('Auto-sync failed:', e); }
+}
+
+async function setupSyncFile() {
+  if (!window.showSaveFilePicker) {
+    alert('Your browser does not support the File System Access API.\nUse Chrome or Edge to enable auto-sync.');
+    return;
+  }
+  try {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: 'broker-crm-data.json',
+      types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+    });
+    syncFileHandle = handle;
+    await idbSaveHandle(handle);
+    await syncToFile();
+    updateDigestSyncStatus();
+  } catch(e) {
+    if (e.name !== 'AbortError') console.error(e);
+  }
+}
+
+function updateDigestSyncStatus() {
+  const el = document.getElementById('digest-sync-status');
+  if (!el) return;
+  if (syncFileHandle) {
+    el.innerHTML = `<span style="color:var(--green)">● Enabled</span> — <span style="color:var(--text-sub)">${syncFileHandle.name}</span>`;
+    document.getElementById('digest-sync-btn').textContent = 'Change File';
+  } else {
+    el.textContent = 'Not configured';
+    document.getElementById('digest-sync-btn').textContent = 'Set Sync File';
+  }
+}
+
+// ── Digest modal ──────────────────────────────────────────────
+function openDigestModal() {
+  renderDigestEmails();
+  updateDigestSyncStatus();
+  document.getElementById('digest-modal').style.display = 'flex';
+}
+function closeDigestModal() {
+  document.getElementById('digest-modal').style.display = 'none';
+}
+
+function renderDigestEmails() {
+  const list = document.getElementById('digest-email-list');
+  if (!list) return;
+  if (digestSettings.emails.length === 0) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">No recipients added yet.</div>';
+    return;
+  }
+  list.innerHTML = digestSettings.emails.map((email, i) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:12px;color:var(--text)">${esc(email)}</span>
+      <button class="btn-ghost" style="font-size:13px;padding:2px 6px" onclick="removeDigestEmail(${i})">×</button>
+    </div>`).join('');
+}
+
+function removeDigestEmail(i) {
+  digestSettings.emails.splice(i, 1);
+  saveDigest();
+  renderDigestEmails();
+}
+
+document.getElementById('btn-digest').onclick    = openDigestModal;
+document.getElementById('digest-close').onclick  = closeDigestModal;
+document.getElementById('digest-cancel').onclick = closeDigestModal;
+document.getElementById('digest-modal').onclick  = e => { if (e.target === e.currentTarget) closeDigestModal(); };
+document.getElementById('digest-sync-btn').onclick = setupSyncFile;
+
+document.getElementById('digest-add-btn').onclick = () => {
+  const input = document.getElementById('digest-add-input');
+  const email = input.value.trim().toLowerCase();
+  if (!email || !email.includes('@')) { alert('Enter a valid email address.'); return; }
+  if (digestSettings.emails.includes(email)) { alert('Already in the list.'); return; }
+  digestSettings.emails.push(email);
+  saveDigest();
+  renderDigestEmails();
+  input.value = '';
+};
+
+document.getElementById('digest-add-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('digest-add-btn').click();
 });
 
 // ── Init ──────────────────────────────────────────────────────

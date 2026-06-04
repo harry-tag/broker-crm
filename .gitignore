@@ -1,0 +1,4 @@
+node_modules/
+.env
+broker-crm-data.json
+scripts/digest-log.txt
