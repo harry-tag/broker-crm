@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Broker CRM</title>
+  <style>
+    :root {
+      --bg:          #0d0f17;
+      --surface:     #13161f;
+      --surface2:    #1c2030;
+      --surface3:    #242840;
+      --border:      #2a2f45;
+      --border2:     #363d5a;
+      --text:        #dce3f0;
+      --text-muted:  #5a6480;
+      --text-sub:    #8892aa;
+      --accent:      #5b6ef5;
+      --accent-h:    #4a5ce0;
+      --green:       #22c47a;
+      --yellow:      #f0a832;
+      --red:         #e85050;
+      --gray:        #5a6480;
+      --font:        'JetBrains Mono', 'Courier New', monospace;
+      --radius:      5px;
+    }
+    [data-theme="light"] {
+      --bg:          #f0f2f7;
+      --surface:     #ffffff;
+      --surface2:    #f6f8fc;
+      --surface3:    #edf0f7;
+      --border:      #dde2ee;
+      --border2:     #c8cedf;
+      --text:        #111827;
+      --text-muted:  #7b849a;
+      --text-sub:    #9098b0;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.55;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 20px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .brand {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: var(--text);
+    }
+    .brand em { color: var(--accent); font-style: normal; }
+    .header-right { display: flex; gap: 6px; align-items: center; }
+
+    /* ── Buttons ─────────────────────────────────── */
+    button { font-family: var(--font); cursor: pointer; border: none; background: none; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px;
+      border-radius: var(--radius);
+      font-size: 12px;
+      font-family: var(--font);
+      transition: background .12s, color .12s, border-color .12s;
+      white-space: nowrap;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-h); }
+    .btn-outline {
+      background: transparent;
+      color: var(--text-sub);
+      border: 1px solid var(--border);
+    }
+    .btn-outline:hover { color: var(--text); border-color: var(--border2); }
+    .btn-ghost { background: transparent; color: var(--text-muted); padding: 5px 8px; border-radius: var(--radius); font-size: 15px; }
+    .btn-ghost:hover { color: var(--text); background: var(--surface3); }
+    .btn-row-action {
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-sub);
+    }
+    .btn-row-action:hover { color: var(--text); border-color: var(--border2); background: var(--surface3); }
+    .btn-del { color: var(--red); }
+    .btn-del:hover { background: rgba(232,80,80,.12); border-color: var(--red); color: var(--red); }
+
+    /* ── Main ────────────────────────────────────── */
+    main { max-width: 1380px; margin: 0 auto; padding: 20px; }
+
+    /* ── Stats bar ───────────────────────────────── */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+    }
+    .stat-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .stat-value { font-size: 30px; font-weight: 700; line-height: 1; }
+    .stat-card.s-total   .stat-value { color: var(--text); }
+    .stat-card.s-overdue .stat-value { color: var(--red); }
+    .stat-card.s-soon    .stat-value { color: var(--yellow); }
+    .stat-card.s-ok      .stat-value { color: var(--green); }
+
+    /* ── Toolbar ─────────────────────────────────── */
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .search-wrap { position: relative; flex: 1; min-width: 180px; }
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 12px;
+      pointer-events: none;
+    }
+    input[type="text"].search-input {
+      width: 100%;
+      padding: 6px 10px 6px 28px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+    }
+    input[type="text"].search-input:focus { outline: none; border-color: var(--accent); }
+    input[type="text"].search-input::placeholder { color: var(--text-muted); }
+    .filter-select {
+      padding: 6px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .filter-select:focus { outline: none; border-color: var(--accent); }
+
+    /* ── Table ───────────────────────────────────── */
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead { background: var(--surface2); }
+    th {
+      padding: 9px 14px;
+      text-align: left;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: var(--surface2); }
+
+    .cell-name { font-weight: 500; }
+    .cell-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 7px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-t1 { background: rgba(91,110,245,.18); color: #8b9cf8; }
+    .badge-t2 { background: rgba(240,168,50,.15); color: #f0a832; }
+    .badge-t3 { background: rgba(90,100,128,.2);  color: #8892aa; }
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .s-fresh   { background: rgba(34,196,122,.12); color: var(--green); }
+    .s-soon    { background: rgba(240,168,50,.12); color: var(--yellow); }
+    .s-overdue { background: rgba(232,80,80,.12);  color: var(--red); }
+    .s-never   { background: rgba(90,100,128,.15); color: var(--gray); }
+
+    .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+    .s-fresh   .dot { background: var(--green); }
+    .s-soon    .dot { background: var(--yellow); }
+    .s-overdue .dot { background: var(--red); }
+    .s-never   .dot { background: var(--gray); }
+
+    .plat-tag {
+      font-size: 11px;
+      color: var(--text-sub);
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 1px 6px;
+    }
+
+    .action-cell { display: flex; gap: 5px; }
+
+    /* ── Empty state ─────────────────────────────── */
+    .empty {
+      padding: 56px 20px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .empty strong { color: var(--text-sub); }
+
+    /* ── Modal ───────────────────────────────────── */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.65);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200;
+    }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 22px 24px;
+      width: 500px;
+      max-width: 96vw;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal-hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .modal-title { font-size: 14px; font-weight: 700; }
+    .modal-x {
+      color: var(--text-muted);
+      font-size: 20px;
+      line-height: 1;
+      padding: 0 4px;
+      border-radius: 3px;
+    }
+    .modal-x:hover { color: var(--text); background: var(--surface3); }
+
+    /* ── Form ────────────────────────────────────── */
+    .field { margin-bottom: 13px; }
+    .field label {
+      display: block;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      padding: 7px 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+    }
+    .field input:focus,
+    .field select:focus,
+    .field textarea:focus { outline: none; border-color: var(--accent); }
+    .field textarea { resize: vertical; min-height: 72px; }
+    .field input::placeholder,
+    .field textarea::placeholder { color: var(--text-muted); }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-footer {
+      display: flex; gap: 8px; justify-content: flex-end;
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .threshold-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+    /* ── Hidden file input ───────────────────────── */
+    #csv-input { display: none; }
+
+    /* ── Scrollbar styling ───────────────────────── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--surface2); }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+    /* ── Responsive ──────────────────────────────── */
+    @media (max-width: 700px) {
+      .stats-bar { grid-template-columns: 1fr 1fr; }
+      .header-right .btn-outline { display: none; }
+      .toolbar { flex-direction: column; }
+      .search-wrap { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ───────────────────────────────────────────────── -->
+<header>
+  <div class="brand">BROKER<em>CRM</em></div>
+  <div class="header-right">
+    <button class="btn btn-outline" id="btn-thresholds">⚙ Thresholds</button>
+    <button class="btn btn-outline" id="btn-import">↑ Import CSV</button>
+    <button class="btn btn-outline" id="btn-export">↓ Export CSV</button>
+    <button class="btn-ghost" id="btn-theme" title="Toggle theme">☾</button>
+    <button class="btn btn-primary" id="btn-add">+ Add Broker</button>
+  </div>
+</header>
+
+<!-- ── Main ─────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Stats -->
+  <div class="stats-bar">
+    <div class="stat-card s-total">
+      <div class="stat-label">Total Brokers</div>
+      <div class="stat-value" id="s-total">0</div>
+    </div>
+    <div class="stat-card s-overdue">
+      <div class="stat-label">Needs Outreach</div>
+      <div class="stat-value" id="s-overdue">0</div>
+    </div>
+    <div class="stat-card s-soon">
+      <div class="stat-label">Due Soon</div>
+      <div class="stat-value" id="s-soon">0</div>
+    </div>
+    <div class="stat-card s-ok">
+      <div class="stat-label">Up to Date</div>
+      <div class="stat-value" id="s-ok">0</div>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input type="text" class="search-input" id="search" placeholder="Search name or firm…">
+    </div>
+    <select class="filter-select" id="filter-tier">
+      <option value="">All Tiers</option>
+      <option value="1">Tier 1</option>
+      <option value="2">Tier 2</option>
+      <option value="3">Tier 3</option>
+    </select>
+    <select class="filter-select" id="filter-status">
+      <option value="">All Statuses</option>
+      <option value="overdue">Overdue</option>
+      <option value="soon">Due Soon</option>
+      <option value="fresh">Fresh</option>
+      <option value="never">Never Contacted</option>
+    </select>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Firm</th>
+          <th>Tier</th>
+          <th>Platform</th>
+          <th>Last Contacted</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty" id="empty-state">
+      No brokers yet. Click <strong>+ Add Broker</strong> to get started.
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Broker modal ──────────────────────────────────────────── -->
+<div class="modal-backdrop" id="broker-modal" style="display:none">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title" id="broker-modal-title">Add Broker</div>
+      <button class="modal-x" id="broker-close">×</button>
+    </div>
+    <form id="broker-form" novalidate>
+      <input type="hidden" id="f-id">
+      <div class="field-row">
+        <div class="field">
+          <label>Name *</label>
+          <input type="text" id="f-name" required placeholder="Jane Smith">
+        </div>
+        <div class="field">
+          <label>Firm *</label>
+          <input type="text" id="f-firm" required placeholder="Acme Advisors">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Tier *</label>
+          <select id="f-tier" required>
+            <option value="">Select…</option>
+            <option value="1">T1 — High priority</option>
+            <option value="2">T2 — Mid priority</option>
+            <option value="3">T3 — Low priority</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Platform</label>
+          <input type="text" id="f-platform" placeholder="Axial, Dealsuite…">
+        </div>
+      </div>
+      <div class="field">
+        <label>Email</label>
+        <input type="text" id="f-email" placeholder="jane@firm.com">
+      </div>
+      <div class="field">
+        <label>Last Contacted</label>
+        <input type="date" id="f-lc">
+      </div>
+      <div class="field">
+        <label>Notes</label>
+        <textarea id="f-notes" placeholder="Deal flow, relationship context…"></textarea>
+      </div>
+      <div class="form-footer">
+        <button type="button" class="btn btn-outline" id="broker-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Broker</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Threshold modal ───────────────────────────────────────── -->
+<div class="modal-backdrop" id="threshold-modal" style="display:none">
+  <div class="modal" style="width:420px">
+    <div class="modal-hdr">
+      <div class="modal-title">Re-engagement Thresholds</div>
+      <button class="modal-x" id="thresh-close">×</button>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:18px">
+      Days elapsed before a broker is considered overdue. "Due Soon" triggers at 50% of the threshold.
+    </p>
+    <div class="threshold-row">
+      <div class="field">
+        <label>Tier 1 (days)</label>
+        <input type="number" id="t-1" min="1" max="365">
+      </div>
+      <div class="field">
+        <label>Tier 2 (days)</label>
+        <input type="number" id="t-2" min="1" max="365">
+      </div>
+      <div class="field">
+        <label>Tier 3 (days)</label>
+        <input type="number" id="t-3" min="1" max="365">
+      </div>
+    </div>
+    <div class="form-footer">
+      <button type="button" class="btn btn-outline" id="thresh-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="thresh-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden CSV file input -->
+<input type="file" id="csv-input" accept=".csv,.txt">
+
+<!-- ── Script ───────────────────────────────────────────────── -->
+<script>
+'use strict';
+
+// ── Constants ────────────────────────────────────────────────
+const BROKERS_KEY    = 'broker-crm-v1';
+const THRESH_KEY     = 'broker-crm-thresholds-v1';
+const THEME_KEY      = 'broker-crm-theme';
+const DEFAULT_THRESH = { 1: 14, 2: 30, 3: 60 };
+
+// ── State ─────────────────────────────────────────────────────
+let brokers    = [];
+let thresholds = Object.assign({}, DEFAULT_THRESH);
+let search     = '';
+let filterTier = '';
+let filterSt   = '';
+
+// ── Persistence ───────────────────────────────────────────────
+function loadAll() {
+  try { brokers = JSON.parse(localStorage.getItem(BROKERS_KEY)) || []; } catch(e) { brokers = []; }
+  try { thresholds = Object.assign({}, DEFAULT_THRESH, JSON.parse(localStorage.getItem(THRESH_KEY))); } catch(e) {}
+  const theme = localStorage.getItem(THEME_KEY) || 'dark';
+  document.documentElement.setAttribute('data-theme', theme);
+  document.getElementById('btn-theme').textContent = theme === 'dark' ? '☾' : '☀';
+}
+function saveBrokers()    { localStorage.setItem(BROKERS_KEY, JSON.stringify(brokers)); }
+function saveThresholds() { localStorage.setItem(THRESH_KEY,  JSON.stringify(thresholds)); }
+
+// ── Helpers ───────────────────────────────────────────────────
+function uuid() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+function esc(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function daysSince(iso) {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).setHours(0,0,0,0);
+  return Math.max(0, Math.floor(ms / 86400000));
+}
+function statusOf(b) {
+  if (!b.lastContacted) return 'never';
+  const d = daysSince(b.lastContacted);
+  const thr = thresholds[b.tier] || DEFAULT_THRESH[b.tier] || 30;
+  const r = d / thr;
+  if (r >= 1)   return 'overdue';
+  if (r >= 0.5) return 'soon';
+  return 'fresh';
+}
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
+
+// ── Render ────────────────────────────────────────────────────
+const ORDER = { overdue:0, soon:1, fresh:2, never:3 };
+
+function render() {
+  // filter
+  const q = search.toLowerCase();
+  const rows = brokers.filter(b => {
+    if (q && !b.name.toLowerCase().includes(q) && !b.firm.toLowerCase().includes(q)) return false;
+    if (filterTier && String(b.tier) !== filterTier) return false;
+    if (filterSt   && statusOf(b) !== filterSt)     return false;
+    return true;
+  });
+
+  // sort: most-overdue first
+  rows.sort((a, b) => {
+    const oa = ORDER[statusOf(a)], ob = ORDER[statusOf(b)];
+    if (oa !== ob) return oa - ob;
+    const da = daysSince(a.lastContacted) ?? -1;
+    const db = daysSince(b.lastContacted) ?? -1;
+    return db - da;
+  });
+
+  // stats (over full dataset, not filtered)
+  const counts = { overdue:0, soon:0, fresh:0, never:0 };
+  brokers.forEach(b => counts[statusOf(b)]++);
+  document.getElementById('s-total').textContent   = brokers.length;
+  document.getElementById('s-overdue').textContent = counts.overdue;
+  document.getElementById('s-soon').textContent    = counts.soon;
+  document.getElementById('s-ok').textContent      = counts.fresh;
+
+  const tbody = document.getElementById('tbody');
+  const empty = document.getElementById('empty-state');
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    empty.innerHTML = brokers.length === 0
+      ? 'No brokers yet. Click <strong>+ Add Broker</strong> to get started.'
+      : 'No brokers match the current filters.';
+    return;
+  }
+  empty.style.display = 'none';
+
+  tbody.innerHTML = rows.map(b => {
+    const st = statusOf(b);
+    const stLabel = { fresh:'Fresh', soon:'Due Soon', overdue:'Overdue', never:'Never' }[st];
+    const days = daysSince(b.lastContacted);
+    const daysStr = days !== null ? `<div class="cell-sub">${days}d ago</div>` : '';
+    return `
+      <tr>
+        <td>
+          <div class="cell-name">${esc(b.name)}</div>
+          ${b.email ? `<div class="cell-sub">${esc(b.email)}</div>` : ''}
+        </td>
+        <td>${esc(b.firm)}</td>
+        <td><span class="badge badge-t${b.tier}">T${b.tier}</span></td>
+        <td>${b.platform ? `<span class="plat-tag">${esc(b.platform)}</span>` : '<span style="color:var(--text-muted)">—</span>'}</td>
+        <td>
+          <div>${fmtDate(b.lastContacted)}</div>
+          ${daysStr}
+        </td>
+        <td>
+          <span class="status-badge s-${st}">
+            <span class="dot"></span>${stLabel}
+          </span>
+        </td>
+        <td>
+          <div class="action-cell">
+            <button class="btn-row-action" onclick="logToday('${b.id}')">Log Today</button>
+            <button class="btn-row-action" onclick="openEdit('${b.id}')">Edit</button>
+            <button class="btn-row-action btn-del" onclick="deleteBroker('${b.id}')">Del</button>
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+// ── Row actions ───────────────────────────────────────────────
+function logToday(id) {
+  const b = brokers.find(x => x.id === id);
+  if (!b) return;
+  b.lastContacted = new Date().toISOString().slice(0,10);
+  saveBrokers(); render();
+}
+function deleteBroker(id) {
+  const b = brokers.find(x => x.id === id);
+  if (!b || !confirm(`Delete "${b.name}"?\nThis cannot be undone.`)) return;
+  brokers = brokers.filter(x => x.id !== id);
+  saveBrokers(); render();
+}
+function openEdit(id) {
+  const b = brokers.find(x => x.id === id);
+  if (b) openBrokerModal(b);
+}
+
+// ── Broker modal ──────────────────────────────────────────────
+function openBrokerModal(b) {
+  const editing = !!b;
+  document.getElementById('broker-modal-title').textContent = editing ? 'Edit Broker' : 'Add Broker';
+  document.getElementById('f-id').value       = b ? b.id : '';
+  document.getElementById('f-name').value     = b ? b.name       || '' : '';
+  document.getElementById('f-firm').value     = b ? b.firm       || '' : '';
+  document.getElementById('f-platform').value = b ? b.platform   || '' : '';
+  document.getElementById('f-email').value    = b ? b.email      || '' : '';
+  document.getElementById('f-lc').value       = b ? b.lastContacted || '' : '';
+  document.getElementById('f-notes').value    = b ? b.notes      || '' : '';
+
+  // Rebuild tier options with current thresholds
+  const sel = document.getElementById('f-tier');
+  sel.innerHTML = `
+    <option value="">Select…</option>
+    <option value="1">T1 — every ${thresholds[1]}d</option>
+    <option value="2">T2 — every ${thresholds[2]}d</option>
+    <option value="3">T3 — every ${thresholds[3]}d</option>
+  `;
+  sel.value = b ? String(b.tier) : '';
+
+  document.getElementById('broker-modal').style.display = 'flex';
+  document.getElementById('f-name').focus();
+}
+function closeBrokerModal() {
+  document.getElementById('broker-modal').style.display = 'none';
+}
+
+document.getElementById('btn-add').onclick         = () => openBrokerModal(null);
+document.getElementById('broker-close').onclick    = closeBrokerModal;
+document.getElementById('broker-cancel').onclick   = closeBrokerModal;
+document.getElementById('broker-modal').onclick    = e => { if (e.target === e.currentTarget) closeBrokerModal(); };
+
+document.getElementById('broker-form').onsubmit = e => {
+  e.preventDefault();
+  const id   = document.getElementById('f-id').value;
+  const name = document.getElementById('f-name').value.trim();
+  const firm = document.getElementById('f-firm').value.trim();
+  const tier = parseInt(document.getElementById('f-tier').value);
+  if (!name || !firm || ![1,2,3].includes(tier)) {
+    alert('Name, Firm, and Tier are required.'); return;
+  }
+  const data = {
+    name, firm, tier,
+    platform:      document.getElementById('f-platform').value.trim(),
+    email:         document.getElementById('f-email').value.trim(),
+    lastContacted: document.getElementById('f-lc').value || null,
+    notes:         document.getElementById('f-notes').value.trim(),
+  };
+  if (id) {
+    const idx = brokers.findIndex(x => x.id === id);
+    if (idx > -1) brokers[idx] = Object.assign({}, brokers[idx], data);
+  } else {
+    brokers.push(Object.assign({ id: uuid() }, data));
+  }
+  saveBrokers(); render(); closeBrokerModal();
+};
+
+// ── Threshold modal ───────────────────────────────────────────
+function openThresholdModal() {
+  document.getElementById('t-1').value = thresholds[1];
+  document.getElementById('t-2').value = thresholds[2];
+  document.getElementById('t-3').value = thresholds[3];
+  document.getElementById('threshold-modal').style.display = 'flex';
+  document.getElementById('t-1').focus();
+}
+function closeThresholdModal() {
+  document.getElementById('threshold-modal').style.display = 'none';
+}
+
+document.getElementById('btn-thresholds').onclick  = openThresholdModal;
+document.getElementById('thresh-close').onclick    = closeThresholdModal;
+document.getElementById('thresh-cancel').onclick   = closeThresholdModal;
+document.getElementById('threshold-modal').onclick = e => { if (e.target === e.currentTarget) closeThresholdModal(); };
+
+document.getElementById('thresh-save').onclick = () => {
+  const v1 = parseInt(document.getElementById('t-1').value);
+  const v2 = parseInt(document.getElementById('t-2').value);
+  const v3 = parseInt(document.getElementById('t-3').value);
+  if (!v1 || !v2 || !v3 || v1 < 1 || v2 < 1 || v3 < 1) {
+    alert('Each threshold must be a positive integer.'); return;
+  }
+  thresholds = { 1: v1, 2: v2, 3: v3 };
+  saveThresholds(); render(); closeThresholdModal();
+};
+
+// ── CSV export ────────────────────────────────────────────────
+document.getElementById('btn-export').onclick = () => {
+  const COLS = ['id','name','firm','tier','email','platform','lastContacted','notes'];
+  const q = v => `"${String(v ?? '').replace(/"/g,'""')}"`;
+  const lines = [COLS.join(','), ...brokers.map(b => COLS.map(c => q(b[c])).join(','))];
+  const blob = new Blob([lines.join('\r\n')], { type:'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `broker-crm-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+// ── CSV import ────────────────────────────────────────────────
+document.getElementById('btn-import').onclick  = () => document.getElementById('csv-input').click();
+document.getElementById('csv-input').onchange  = e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => importCSV(ev.target.result);
+  reader.readAsText(file);
+  e.target.value = '';
+};
+
+function csvRow(line) {
+  const cells = []; let cur = ''; let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++; } else inQ = !inQ; }
+    else if (c === ',' && !inQ) { cells.push(cur); cur = ''; }
+    else cur += c;
+  }
+  cells.push(cur);
+  return cells;
+}
+
+function importCSV(text) {
+  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim().split('\n');
+  if (lines.length < 2) { alert('CSV appears empty.'); return; }
+
+  const hdr = csvRow(lines[0]).map(h => h.trim().toLowerCase().replace(/\s+/g,''));
+  const col = k => hdr.indexOf(k);
+  const get = (row, k) => { const i = col(k); return i >= 0 ? (row[i]||'').trim() : ''; };
+
+  if (col('name') < 0 || col('firm') < 0) {
+    alert('CSV must include "name" and "firm" columns.'); return;
+  }
+
+  let added = 0, updated = 0;
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const row  = csvRow(lines[i]);
+    const name = get(row, 'name');
+    const firm = get(row, 'firm');
+    if (!name || !firm) continue;
+
+    const existing = brokers.find(b =>
+      b.name.toLowerCase() === name.toLowerCase() &&
+      b.firm.toLowerCase() === firm.toLowerCase()
+    );
+    const tierRaw = parseInt(get(row,'tier'));
+    const tier = [1,2,3].includes(tierRaw) ? tierRaw : 3;
+
+    // lastContacted: check multiple header variations
+    const lcKeys = ['lastcontacted','last_contacted','lastcontact'];
+    let lc = '';
+    for (const k of lcKeys) { lc = get(row, k); if (lc) break; }
+
+    if (existing) {
+      if (tier)                  existing.tier     = tier;
+      if (get(row,'email'))      existing.email    = get(row,'email');
+      if (get(row,'platform'))   existing.platform = get(row,'platform');
+      if (get(row,'notes'))      existing.notes    = get(row,'notes');
+      // intentionally do NOT overwrite lastContacted
+      updated++;
+    } else {
+      brokers.push({
+        id:            uuid(),
+        name, firm, tier,
+        email:         get(row,'email'),
+        platform:      get(row,'platform'),
+        lastContacted: lc || null,
+        notes:         get(row,'notes'),
+      });
+      added++;
+    }
+  }
+  saveBrokers(); render();
+  alert(`Import complete.\n${added} added, ${updated} updated (lastContacted preserved on existing records).`);
+}
+
+// ── Search / filters ──────────────────────────────────────────
+document.getElementById('search').oninput        = e => { search     = e.target.value; render(); };
+document.getElementById('filter-tier').onchange  = e => { filterTier = e.target.value; render(); };
+document.getElementById('filter-status').onchange= e => { filterSt   = e.target.value; render(); };
+
+// ── Theme toggle ──────────────────────────────────────────────
+document.getElementById('btn-theme').onclick = () => {
+  const cur  = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem(THEME_KEY, next);
+  document.getElementById('btn-theme').textContent = next === 'dark' ? '☾' : '☀';
+};
+
+// ── Keyboard shortcuts ────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeBrokerModal(); closeThresholdModal(); }
+  if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey) {
+    if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+    openBrokerModal(null);
+  }
+});
+
+// ── Init ──────────────────────────────────────────────────────
+loadAll();
+render();
+</script>
+</body>
+</html>
