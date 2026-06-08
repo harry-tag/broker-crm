@@ -3,6 +3,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 
 const { createClient } = require('@supabase/supabase-js');
 const { Resend }       = require('resend');
+const ws               = require('ws');
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const SUPABASE_URL   = process.env.SUPABASE_URL;
@@ -13,7 +14,7 @@ if (!RESEND_API_KEY) { console.error('ERROR: Missing RESEND_API_KEY'); process.e
 if (!SUPABASE_URL)   { console.error('ERROR: Missing SUPABASE_URL');   process.exit(1); }
 if (!SUPABASE_KEY)   { console.error('ERROR: Missing SUPABASE_KEY');   process.exit(1); }
 
-const supa   = createClient(SUPABASE_URL, SUPABASE_KEY);
+const supa   = createClient(SUPABASE_URL, SUPABASE_KEY, { realtime: { transport: ws } });
 const resend = new Resend(RESEND_API_KEY);
 
 // ── Same logic as the CRM ─────────────────────────────────────
