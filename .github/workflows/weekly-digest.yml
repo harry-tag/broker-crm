@@ -1,0 +1,26 @@
+name: Weekly Broker Digest
+
+on:
+  schedule:
+    - cron: '0 13 * * 1'  # Every Monday at 9am ET (1pm UTC)
+  workflow_dispatch:        # Allow manual trigger from the Actions tab
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Send weekly digest
+        run: node scripts/weekly-digest.js
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}

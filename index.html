@@ -226,6 +226,12 @@
     .s-overdue .dot { background: var(--red); }
     .s-never   .dot { background: var(--gray); }
 
+    .ds-early       { background: rgba(90,100,128,.2);   color: #8892aa; }
+    .ds-ioi         { background: rgba(91,110,245,.18);  color: #8b9cf8; }
+    .ds-loi         { background: rgba(240,168,50,.15);  color: #f0a832; }
+    .ds-dd          { background: rgba(34,196,122,.12);  color: #22c47a; }
+    .ds-closed-lost { background: rgba(232,80,80,.12);   color: #e85050; }
+
     .plat-tag {
       font-size: 11px;
       color: var(--text-sub);
@@ -400,6 +406,7 @@
           <th>Firm</th>
           <th>Tier</th>
           <th>Platform</th>
+          <th>Deals</th>
           <th>Last Contacted</th>
           <th>Status</th>
           <th>Actions</th>
@@ -499,6 +506,60 @@
   </div>
 </div>
 
+<!-- ── Deals modal ───────────────────────────────────────────── -->
+<div class="modal-backdrop" id="deals-modal" style="display:none">
+  <div class="modal" style="width:580px">
+    <div class="modal-hdr">
+      <div>
+        <div class="modal-title" id="deals-modal-title">Deal Flow</div>
+        <div id="deals-modal-sub" style="font-size:11px;color:var(--text-muted);margin-top:2px"></div>
+      </div>
+      <button class="modal-x" id="deals-close">×</button>
+    </div>
+
+    <div id="deals-stats" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap"></div>
+
+    <div style="margin-bottom:12px">
+      <button class="btn btn-primary" id="deals-log-btn">+ Log Deal</button>
+    </div>
+
+    <div id="deals-add-form" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:14px">
+      <div class="field-row">
+        <div class="field">
+          <label>Company / Deal Name *</label>
+          <input type="text" id="deal-f-name" placeholder="Acme Corp">
+        </div>
+        <div class="field">
+          <label>Date Shown *</label>
+          <input type="date" id="deal-f-date">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Stage</label>
+          <select id="deal-f-status">
+            <option value="early">Early</option>
+            <option value="ioi">IOI</option>
+            <option value="loi">LOI</option>
+            <option value="dd">DD</option>
+            <option value="closed_lost">Closed Lost</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Notes</label>
+          <input type="text" id="deal-f-notes" placeholder="Optional context">
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px">
+        <button class="btn btn-outline" id="deal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="deal-save">Save Deal</button>
+      </div>
+    </div>
+
+    <div id="deals-list" style="max-height:360px;overflow-y:auto"></div>
+  </div>
+</div>
+
 <!-- ── Digest modal ───────────────────────────────────────────── -->
 <div class="modal-backdrop" id="digest-modal" style="display:none">
   <div class="modal" style="width:440px">
@@ -517,15 +578,6 @@
       </div>
     </div>
 
-    <div>
-      <label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px">Auto-Sync File</label>
-      <div id="digest-sync-status" style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Not configured</div>
-      <button class="btn btn-outline" id="digest-sync-btn">Set Sync File</button>
-      <p style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">
-        Picks a local JSON file to keep in sync. The weekly digest script reads this file — save it anywhere (e.g. your project folder).
-      </p>
-    </div>
-
     <div class="form-footer">
       <button class="btn btn-outline" id="digest-cancel">Close</button>
     </div>
@@ -535,41 +587,122 @@
 <!-- Hidden CSV file input -->
 <input type="file" id="csv-input" accept=".csv,.txt">
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
 <!-- ── Script ───────────────────────────────────────────────── -->
 <script>
 'use strict';
 
-// ── Constants ────────────────────────────────────────────────
-const BROKERS_KEY    = 'broker-crm-v1';
-const THRESH_KEY     = 'broker-crm-thresholds-v1';
+// ── Supabase ──────────────────────────────────────────────────
+const supa = supabase.createClient(
+  'https://yctkxbfgksuvbroxndrz.supabase.co',
+  'sb_publishable_Zh18-MlS6-cRBobB2dVyIQ_s82DFh1S'
+);
+
+// ── Constants ─────────────────────────────────────────────────
 const THEME_KEY      = 'broker-crm-theme';
-const DIGEST_KEY     = 'broker-crm-digest-v1';
 const DEFAULT_THRESH = { 1: 14, 2: 30, 3: 60 };
-const IDB_DB         = 'broker-crm-idb';
-const IDB_STORE      = 'handles';
 
 // ── State ─────────────────────────────────────────────────────
 let brokers        = [];
 let thresholds     = Object.assign({}, DEFAULT_THRESH);
 let digestSettings = { emails: [] };
-let syncFileHandle = null;
+let dealsBroker    = null;
 let search     = '';
 let filterTier = '';
 let filterSt   = '';
 
+// ── DB mapping ────────────────────────────────────────────────
+function dbToBroker(row) {
+  return {
+    id:            row.id,
+    name:          row.name,
+    firm:          row.firm,
+    tier:          row.tier,
+    platform:      row.platform       || '',
+    email:         row.email          || '',
+    lastContacted: row.last_contacted || null,
+    notes:         row.notes          || '',
+    deals:         row.deals          || [],
+  };
+}
+
+function brokerToDb(b) {
+  return {
+    id:             b.id,
+    name:           b.name,
+    firm:           b.firm,
+    tier:           b.tier,
+    platform:       b.platform      || null,
+    email:          b.email         || null,
+    last_contacted: b.lastContacted || null,
+    notes:          b.notes         || null,
+    deals:          b.deals         || [],
+    updated_at:     new Date().toISOString(),
+  };
+}
+
 // ── Persistence ───────────────────────────────────────────────
-function loadAll() {
-  try { brokers = JSON.parse(localStorage.getItem(BROKERS_KEY)) || []; } catch(e) { brokers = []; }
-  try { thresholds = Object.assign({}, DEFAULT_THRESH, JSON.parse(localStorage.getItem(THRESH_KEY))); } catch(e) {}
-  try { digestSettings = Object.assign({ emails: [] }, JSON.parse(localStorage.getItem(DIGEST_KEY))); } catch(e) {}
+async function loadAll() {
+  document.getElementById('empty-state').textContent = 'Loading…';
+  document.getElementById('empty-state').style.display = 'block';
+  document.getElementById('tbody').innerHTML = '';
+
+  const [{ data: rows }, { data: settingsRows }] = await Promise.all([
+    supa.from('brokers').select('*'),
+    supa.from('settings').select('*'),
+  ]);
+
+  brokers = (rows || []).map(dbToBroker);
+
+  const map      = Object.fromEntries((settingsRows || []).map(s => [s.key, s.value]));
+  thresholds     = Object.assign({}, DEFAULT_THRESH, map.thresholds);
+  digestSettings = Object.assign({ emails: [] }, map.digest);
+
   const theme = localStorage.getItem(THEME_KEY) || 'dark';
   document.documentElement.setAttribute('data-theme', theme);
   document.getElementById('btn-theme').textContent = theme === 'dark' ? '☾' : '☀';
-  idbLoadHandle().then(h => { syncFileHandle = h || null; });
 }
-function saveBrokers()    { localStorage.setItem(BROKERS_KEY, JSON.stringify(brokers)); syncToFile(); }
-function saveThresholds() { localStorage.setItem(THRESH_KEY,  JSON.stringify(thresholds)); syncToFile(); }
-function saveDigest()     { localStorage.setItem(DIGEST_KEY,  JSON.stringify(digestSettings)); syncToFile(); }
+
+async function saveBroker(b) {
+  const { error } = await supa.from('brokers').upsert(brokerToDb(b));
+  if (error) console.error('Save failed:', error);
+}
+
+async function deleteBrokerDb(id) {
+  const { error } = await supa.from('brokers').delete().eq('id', id);
+  if (error) { alert('Delete failed. Please refresh.'); await loadAll(); render(); }
+}
+
+async function saveThresholds() {
+  await supa.from('settings').upsert({ key: 'thresholds', value: thresholds });
+}
+
+async function saveDigest() {
+  await supa.from('settings').upsert({ key: 'digest', value: digestSettings });
+}
+
+// ── Real-time ─────────────────────────────────────────────────
+function subscribeRealtime() {
+  supa.channel('brokers-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'brokers' }, payload => {
+      if (payload.eventType === 'DELETE') {
+        brokers = brokers.filter(b => b.id !== payload.old.id);
+      } else {
+        const b = dbToBroker(payload.new);
+        const idx = brokers.findIndex(x => x.id === b.id);
+        if (idx >= 0) brokers[idx] = b;
+        else brokers.push(b);
+        if (dealsBroker && dealsBroker.id === b.id) {
+          dealsBroker = b;
+          renderDealStats();
+          renderDealsList();
+        }
+      }
+      render();
+    })
+    .subscribe();
+}
 
 // ── Helpers ───────────────────────────────────────────────────
 function uuid() {
@@ -616,13 +749,12 @@ function render() {
     return true;
   });
 
-  // sort: most-overdue first
   rows.sort((a, b) => {
     const oa = ORDER[statusOf(a)], ob = ORDER[statusOf(b)];
     if (oa !== ob) return oa - ob;
     const da = daysSince(a.lastContacted) ?? -1;
-    const db = daysSince(b.lastContacted) ?? -1;
-    return db - da;
+    const dbb = daysSince(b.lastContacted) ?? -1;
+    return dbb - da;
   });
 
   // stats (over full dataset, not filtered)
@@ -661,6 +793,11 @@ function render() {
         <td><span class="badge badge-t${b.tier}">T${b.tier}</span></td>
         <td>${b.platform ? `<span class="plat-tag">${esc(b.platform)}</span>` : '<span style="color:var(--text-muted)">—</span>'}</td>
         <td>
+          <button class="btn-row-action" onclick="openDealsModal('${b.id}')" style="${b.deals && b.deals.length > 0 ? 'color:var(--accent);border-color:var(--accent)' : ''}">
+            ${b.deals && b.deals.length > 0 ? `${b.deals.length} deal${b.deals.length !== 1 ? 's' : ''}` : '+ log'}
+          </button>
+        </td>
+        <td>
           <div>${fmtDate(b.lastContacted)}</div>
           ${daysStr}
         </td>
@@ -685,13 +822,15 @@ function logToday(id) {
   const b = brokers.find(x => x.id === id);
   if (!b) return;
   b.lastContacted = new Date().toISOString().slice(0,10);
-  saveBrokers(); render();
+  render();
+  saveBroker(b);
 }
-function deleteBroker(id) {
+async function deleteBroker(id) {
   const b = brokers.find(x => x.id === id);
   if (!b || !confirm(`Delete "${b.name}"?\nThis cannot be undone.`)) return;
   brokers = brokers.filter(x => x.id !== id);
-  saveBrokers(); render();
+  render();
+  deleteBrokerDb(id);
 }
 function openEdit(id) {
   const b = brokers.find(x => x.id === id);
@@ -748,13 +887,16 @@ document.getElementById('broker-form').onsubmit = e => {
     lastContacted: document.getElementById('f-lc').value || null,
     notes:         document.getElementById('f-notes').value.trim(),
   };
+  let broker;
   if (id) {
     const idx = brokers.findIndex(x => x.id === id);
-    if (idx > -1) brokers[idx] = Object.assign({}, brokers[idx], data);
+    if (idx > -1) { brokers[idx] = Object.assign({}, brokers[idx], data); broker = brokers[idx]; }
   } else {
-    brokers.push(Object.assign({ id: uuid() }, data));
+    broker = Object.assign({ id: uuid(), deals: [] }, data);
+    brokers.push(broker);
   }
-  saveBrokers(); render(); closeBrokerModal();
+  render(); closeBrokerModal();
+  if (broker) saveBroker(broker);
 };
 
 // ── Threshold modal ───────────────────────────────────────────
@@ -782,7 +924,8 @@ document.getElementById('thresh-save').onclick = () => {
     alert('Each threshold must be a positive integer.'); return;
   }
   thresholds = { 1: v1, 2: v2, 3: v3 };
-  saveThresholds(); render(); closeThresholdModal();
+  render(); closeThresholdModal();
+  saveThresholds();
 };
 
 // ── CSV export ────────────────────────────────────────────────
@@ -835,6 +978,7 @@ function importCSV(text) {
   }
 
   let added = 0, updated = 0;
+  const changed = [];
   for (let i = 1; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
     const row  = csvRow(lines[i]);
@@ -849,7 +993,6 @@ function importCSV(text) {
     const tierRaw = parseInt(get(row,'tier'));
     const tier = [1,2,3].includes(tierRaw) ? tierRaw : 3;
 
-    // lastContacted: check multiple header variations
     const lcKeys = ['lastcontacted','last_contacted','lastcontact'];
     let lc = '';
     for (const k of lcKeys) { lc = get(row, k); if (lc) break; }
@@ -859,21 +1002,25 @@ function importCSV(text) {
       if (get(row,'email'))      existing.email    = get(row,'email');
       if (get(row,'platform'))   existing.platform = get(row,'platform');
       if (get(row,'notes'))      existing.notes    = get(row,'notes');
-      // intentionally do NOT overwrite lastContacted
+      changed.push(existing);
       updated++;
     } else {
-      brokers.push({
+      const b = {
         id:            uuid(),
         name, firm, tier,
         email:         get(row,'email'),
         platform:      get(row,'platform'),
         lastContacted: lc || null,
         notes:         get(row,'notes'),
-      });
+        deals:         [],
+      };
+      brokers.push(b);
+      changed.push(b);
       added++;
     }
   }
-  saveBrokers(); render();
+  render();
+  Promise.all(changed.map(b => saveBroker(b)));
   alert(`Import complete.\n${added} added, ${updated} updated (lastContacted preserved on existing records).`);
 }
 
@@ -900,90 +1047,125 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// ── IndexedDB helpers (persists FileSystemFileHandle) ─────────
-function idbOpen() {
-  return new Promise((res, rej) => {
-    const req = indexedDB.open(IDB_DB, 1);
-    req.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
-    req.onsuccess = e => res(e.target.result);
-    req.onerror   = e => rej(e.target.error);
-  });
-}
-async function idbLoadHandle() {
-  try {
-    const db = await idbOpen();
-    return new Promise((res, rej) => {
-      const tx  = db.transaction(IDB_STORE, 'readonly');
-      const req = tx.objectStore(IDB_STORE).get('syncFile');
-      req.onsuccess = e => res(e.target.result || null);
-      req.onerror   = e => rej(e.target.error);
-    });
-  } catch(e) { return null; }
-}
-async function idbSaveHandle(handle) {
-  try {
-    const db = await idbOpen();
-    return new Promise((res, rej) => {
-      const tx  = db.transaction(IDB_STORE, 'readwrite');
-      const req = tx.objectStore(IDB_STORE).put(handle, 'syncFile');
-      req.onsuccess = () => res();
-      req.onerror   = e => rej(e.target.error);
-    });
-  } catch(e) {}
+// ── Deals modal ───────────────────────────────────────────────
+const DEAL_LABELS = { early: 'Early', ioi: 'IOI', loi: 'LOI', dd: 'DD', closed_lost: 'Closed Lost' };
+const DEAL_CLASS  = { early: 'ds-early', ioi: 'ds-ioi', loi: 'ds-loi', dd: 'ds-dd', closed_lost: 'ds-closed-lost' };
+
+function openDealsModal(id) {
+  dealsBroker = brokers.find(b => b.id === id);
+  if (!dealsBroker) return;
+  if (!dealsBroker.deals) dealsBroker.deals = [];
+
+  document.getElementById('deals-modal-title').textContent = `Deal Flow — ${dealsBroker.name}`;
+  document.getElementById('deals-modal-sub').textContent   = dealsBroker.firm;
+  document.getElementById('deals-add-form').style.display  = 'none';
+  document.getElementById('deal-f-name').value    = '';
+  document.getElementById('deal-f-date').value    = new Date().toISOString().slice(0, 10);
+  document.getElementById('deal-f-status').value  = 'early';
+  document.getElementById('deal-f-notes').value   = '';
+
+  renderDealStats();
+  renderDealsList();
+  document.getElementById('deals-modal').style.display = 'flex';
 }
 
-// ── File sync ─────────────────────────────────────────────────
-async function syncToFile() {
-  if (!syncFileHandle) return;
-  try {
-    const perm = await syncFileHandle.requestPermission({ mode: 'readwrite' });
-    if (perm !== 'granted') return;
-    const writable = await syncFileHandle.createWritable();
-    await writable.write(JSON.stringify({
-      brokers,
-      thresholds,
-      digestEmails: digestSettings.emails,
-      exportedAt: new Date().toISOString(),
-    }, null, 2));
-    await writable.close();
-  } catch(e) { console.warn('Auto-sync failed:', e); }
+function closeDealsModal() {
+  document.getElementById('deals-modal').style.display = 'none';
+  dealsBroker = null;
 }
 
-async function setupSyncFile() {
-  if (!window.showSaveFilePicker) {
-    alert('Your browser does not support the File System Access API.\nUse Chrome or Edge to enable auto-sync.');
+function renderDealStats() {
+  const deals       = dealsBroker.deals || [];
+  const thisYear    = new Date().getFullYear();
+  const countYear   = deals.filter(d => d.date && new Date(d.date).getFullYear() === thisYear).length;
+  const countActive = deals.filter(d => ['early','ioi','loi','dd'].includes(d.status)).length;
+
+  const stat = (label, val, color) => `
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px;min-width:80px">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);margin-bottom:2px">${label}</div>
+      <div style="font-size:22px;font-weight:700;color:${color}">${val}</div>
+    </div>`;
+
+  document.getElementById('deals-stats').innerHTML = [
+    stat('Total', deals.length, 'var(--text)'),
+    stat('This Year', countYear, 'var(--accent)'),
+    stat('Active', countActive, 'var(--green)'),
+  ].join('');
+}
+
+function renderDealsList() {
+  const deals = [...(dealsBroker.deals || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const list  = document.getElementById('deals-list');
+
+  if (deals.length === 0) {
+    list.innerHTML = '<div style="text-align:center;padding:32px 0;color:var(--text-muted);font-size:12px">No deals logged yet.</div>';
     return;
   }
-  try {
-    const handle = await window.showSaveFilePicker({
-      suggestedName: 'broker-crm-data.json',
-      types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
-    });
-    syncFileHandle = handle;
-    await idbSaveHandle(handle);
-    await syncToFile();
-    updateDigestSyncStatus();
-  } catch(e) {
-    if (e.name !== 'AbortError') console.error(e);
-  }
+
+  list.innerHTML = deals.map(d => `
+    <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0">
+          <span style="font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name)}</span>
+          <span class="status-badge ${DEAL_CLASS[d.status] || 'ds-early'}" style="font-size:10px;white-space:nowrap">${DEAL_LABELS[d.status] || d.status}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <span style="font-size:11px;color:var(--text-muted)">${fmtDate(d.date)}</span>
+          <button class="btn-ghost btn-del" style="font-size:13px;padding:1px 5px" onclick="deleteDeal('${d.id}')">×</button>
+        </div>
+      </div>
+      ${d.notes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(d.notes)}</div>` : ''}
+    </div>`).join('');
 }
 
-function updateDigestSyncStatus() {
-  const el = document.getElementById('digest-sync-status');
-  if (!el) return;
-  if (syncFileHandle) {
-    el.innerHTML = `<span style="color:var(--green)">● Enabled</span> — <span style="color:var(--text-sub)">${syncFileHandle.name}</span>`;
-    document.getElementById('digest-sync-btn').textContent = 'Change File';
-  } else {
-    el.textContent = 'Not configured';
-    document.getElementById('digest-sync-btn').textContent = 'Set Sync File';
-  }
+function deleteDeal(dealId) {
+  if (!dealsBroker || !confirm('Remove this deal?')) return;
+  dealsBroker.deals = (dealsBroker.deals || []).filter(d => d.id !== dealId);
+  saveBroker(dealsBroker); renderDealStats(); renderDealsList(); render();
 }
+
+document.getElementById('deals-log-btn').onclick = () => {
+  const form    = document.getElementById('deals-add-form');
+  const showing = form.style.display !== 'none';
+  form.style.display = showing ? 'none' : 'block';
+  if (!showing) document.getElementById('deal-f-name').focus();
+};
+
+document.getElementById('deal-cancel').onclick = () => {
+  document.getElementById('deals-add-form').style.display = 'none';
+};
+
+document.getElementById('deal-save').onclick = () => {
+  if (!dealsBroker) return;
+  const name   = document.getElementById('deal-f-name').value.trim();
+  const date   = document.getElementById('deal-f-date').value;
+  const status = document.getElementById('deal-f-status').value;
+  const notes  = document.getElementById('deal-f-notes').value.trim();
+  if (!name) { alert('Deal name is required.'); return; }
+  if (!date) { alert('Date is required.'); return; }
+
+  if (!dealsBroker.deals) dealsBroker.deals = [];
+  dealsBroker.deals.push({ id: uuid(), name, date, status, notes });
+
+  if (!dealsBroker.lastContacted || date > dealsBroker.lastContacted) {
+    dealsBroker.lastContacted = date;
+  }
+
+  saveBroker(dealsBroker); renderDealStats(); renderDealsList(); render();
+
+  document.getElementById('deal-f-name').value   = '';
+  document.getElementById('deal-f-date').value   = new Date().toISOString().slice(0, 10);
+  document.getElementById('deal-f-status').value = 'early';
+  document.getElementById('deal-f-notes').value  = '';
+  document.getElementById('deals-add-form').style.display = 'none';
+};
+
+document.getElementById('deals-close').onclick = closeDealsModal;
+document.getElementById('deals-modal').onclick  = e => { if (e.target === e.currentTarget) closeDealsModal(); };
 
 // ── Digest modal ──────────────────────────────────────────────
 function openDigestModal() {
   renderDigestEmails();
-  updateDigestSyncStatus();
   document.getElementById('digest-modal').style.display = 'flex';
 }
 function closeDigestModal() {
@@ -1006,15 +1188,14 @@ function renderDigestEmails() {
 
 function removeDigestEmail(i) {
   digestSettings.emails.splice(i, 1);
-  saveDigest();
   renderDigestEmails();
+  saveDigest();
 }
 
 document.getElementById('btn-digest').onclick    = openDigestModal;
 document.getElementById('digest-close').onclick  = closeDigestModal;
 document.getElementById('digest-cancel').onclick = closeDigestModal;
 document.getElementById('digest-modal').onclick  = e => { if (e.target === e.currentTarget) closeDigestModal(); };
-document.getElementById('digest-sync-btn').onclick = setupSyncFile;
 
 document.getElementById('digest-add-btn').onclick = () => {
   const input = document.getElementById('digest-add-input');
@@ -1022,8 +1203,8 @@ document.getElementById('digest-add-btn').onclick = () => {
   if (!email || !email.includes('@')) { alert('Enter a valid email address.'); return; }
   if (digestSettings.emails.includes(email)) { alert('Already in the list.'); return; }
   digestSettings.emails.push(email);
-  saveDigest();
   renderDigestEmails();
+  saveDigest();
   input.value = '';
 };
 
@@ -1032,8 +1213,10 @@ document.getElementById('digest-add-input').addEventListener('keydown', e => {
 });
 
 // ── Init ──────────────────────────────────────────────────────
-loadAll();
-render();
+loadAll().then(() => {
+  render();
+  subscribeRealtime();
+});
 </script>
 </body>
 </html>

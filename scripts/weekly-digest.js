@@ -1,17 +1,20 @@
 'use strict';
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
-const { Resend } = require('resend');
-const fs   = require('fs');
-const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
+const { Resend }       = require('resend');
 
-const API_KEY   = process.env.RESEND_API_KEY;
-const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, '..', 'broker-crm-data.json');
-const DRY_RUN   = process.argv.includes('--dry-run');
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const SUPABASE_URL   = process.env.SUPABASE_URL;
+const SUPABASE_KEY   = process.env.SUPABASE_KEY;
+const DRY_RUN        = process.argv.includes('--dry-run');
 
-if (!API_KEY) { console.error('ERROR: Missing RESEND_API_KEY in .env'); process.exit(1); }
+if (!RESEND_API_KEY) { console.error('ERROR: Missing RESEND_API_KEY'); process.exit(1); }
+if (!SUPABASE_URL)   { console.error('ERROR: Missing SUPABASE_URL');   process.exit(1); }
+if (!SUPABASE_KEY)   { console.error('ERROR: Missing SUPABASE_KEY');   process.exit(1); }
 
-const resend = new Resend(API_KEY);
+const supa   = createClient(SUPABASE_URL, SUPABASE_KEY);
+const resend = new Resend(RESEND_API_KEY);
 
 // ── Same logic as the CRM ─────────────────────────────────────
 function daysSince(iso) {
@@ -42,28 +45,32 @@ function esc(s) {
 
 // ── Main ──────────────────────────────────────────────────────
 async function main() {
-  if (!fs.existsSync(DATA_FILE)) {
-    console.error(`Data file not found: ${DATA_FILE}`);
-    console.error('Open the CRM and click "Digest" → "Set Sync File" to enable auto-sync.');
-    process.exit(1);
-  }
+  const [{ data: rows, error: bErr }, { data: settingsRows, error: sErr }] = await Promise.all([
+    supa.from('brokers').select('*'),
+    supa.from('settings').select('*'),
+  ]);
 
-  const raw        = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  const brokers    = raw.brokers    || [];
-  const thresholds = raw.thresholds || { 1: 14, 2: 30, 3: 60 };
-  const recipients = (raw.digestEmails || []).filter(Boolean);
+  if (bErr) { console.error('Failed to fetch brokers:', bErr.message); process.exit(1); }
+  if (sErr) { console.error('Failed to fetch settings:', sErr.message); process.exit(1); }
+
+  const brokers = (rows || []).map(row => ({
+    ...row,
+    lastContacted: row.last_contacted || null,
+  }));
+
+  const map        = Object.fromEntries((settingsRows || []).map(s => [s.key, s.value]));
+  const thresholds = Object.assign({ 1: 14, 2: 30, 3: 60 }, map.thresholds);
+  const recipients = ((map.digest && map.digest.emails) || []).filter(Boolean);
 
   if (recipients.length === 0) {
     console.error('No recipients found. Add emails in the CRM under Digest settings.');
     process.exit(1);
   }
 
-  // Overdue: past their threshold
   const overdue = brokers
     .filter(b => statusOf(b, thresholds) === 'overdue')
     .sort((a, b) => (daysSince(b.lastContacted) || 0) - (daysSince(a.lastContacted) || 0));
 
-  // Due soon: will tip to overdue within 7 days
   const dueSoon = brokers
     .filter(b => {
       if (statusOf(b, thresholds) !== 'soon') return false;
@@ -72,7 +79,7 @@ async function main() {
     })
     .sort((a, b) => (daysUntilOverdue(a, thresholds) || 0) - (daysUntilOverdue(b, thresholds) || 0));
 
-  const never = brokers.filter(b => statusOf(b, thresholds) === 'never');
+  const never  = brokers.filter(b => statusOf(b, thresholds) === 'never');
 
   const weekOf  = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const subject = `Broker CRM — Week of ${weekOf}: ${overdue.length} overdue, ${dueSoon.length} due soon`;
@@ -83,7 +90,7 @@ async function main() {
     console.log('To      :', recipients.join(', '));
     console.log('Overdue :', overdue.length, overdue.map(b => b.name).join(', ') || '—');
     console.log('Due soon:', dueSoon.length, dueSoon.map(b => b.name).join(', ') || '—');
-    console.log('Never   :', never.length, never.map(b => b.name).join(', ') || '—');
+    console.log('Never   :', never.length,   never.map(b => b.name).join(', ')   || '—');
     return;
   }
 
