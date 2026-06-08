@@ -8,6 +8,7 @@ const ws               = require('ws');
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const SUPABASE_URL   = process.env.SUPABASE_URL;
 const SUPABASE_KEY   = process.env.SUPABASE_KEY;
+const CRM_URL        = process.env.CRM_URL || '';
 const DRY_RUN        = process.argv.includes('--dry-run');
 
 if (!RESEND_API_KEY) { console.error('ERROR: Missing RESEND_API_KEY'); process.exit(1); }
@@ -68,34 +69,42 @@ async function main() {
     process.exit(1);
   }
 
-  const overdue = brokers
-    .filter(b => statusOf(b, thresholds) === 'overdue')
-    .sort((a, b) => (daysSince(b.lastContacted) || 0) - (daysSince(a.lastContacted) || 0));
+  // brokers needing attention per tier, sorted overdue-first then soonest-to-tip
+  function tierBrokers(tierNum) {
+    return brokers
+      .filter(b => b.tier === tierNum && (statusOf(b, thresholds) === 'overdue' || statusOf(b, thresholds) === 'soon'))
+      .sort((a, b) => (daysSince(b.lastContacted) || 0) - (daysSince(a.lastContacted) || 0));
+  }
 
-  const dueSoon = brokers
-    .filter(b => {
-      if (statusOf(b, thresholds) !== 'soon') return false;
-      const dtu = daysUntilOverdue(b, thresholds);
-      return dtu !== null && dtu <= 7;
-    })
-    .sort((a, b) => (daysUntilOverdue(a, thresholds) || 0) - (daysUntilOverdue(b, thresholds) || 0));
+  const t1 = tierBrokers(1);
+  const t2 = tierBrokers(2);
+  const t3 = tierBrokers(3);
 
-  const never  = brokers.filter(b => statusOf(b, thresholds) === 'never');
+  const totalOverdue = brokers.filter(b => statusOf(b, thresholds) === 'overdue').length;
+  const totalSoon    = brokers.filter(b => statusOf(b, thresholds) === 'soon').length;
+  const totalNever   = brokers.filter(b => statusOf(b, thresholds) === 'never').length;
 
   const weekOf  = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  const subject = `Broker CRM — Week of ${weekOf}: ${overdue.length} overdue, ${dueSoon.length} due soon`;
+  const subject = `Broker CRM — Week of ${weekOf}: ${totalOverdue} overdue, ${totalSoon} due soon`;
 
   if (DRY_RUN) {
     console.log('\n=== DRY RUN (no email sent) ===');
-    console.log('Subject :', subject);
-    console.log('To      :', recipients.join(', '));
-    console.log('Overdue :', overdue.length, overdue.map(b => b.name).join(', ') || '—');
-    console.log('Due soon:', dueSoon.length, dueSoon.map(b => b.name).join(', ') || '—');
-    console.log('Never   :', never.length,   never.map(b => b.name).join(', ')   || '—');
+    console.log('Subject  :', subject);
+    console.log('To       :', recipients.join(', '));
+    console.log('Overdue  :', totalOverdue);
+    console.log('Due soon :', totalSoon);
+    console.log('Never    :', totalNever);
+    console.log('T1 action:', t1.length, t1.map(b => b.name).join(', ') || '—');
+    console.log('T2 action:', t2.length, t2.map(b => b.name).join(', ') || '—');
+    console.log('T3 action:', t3.length, t3.map(b => b.name).join(', ') || '—');
     return;
   }
 
-  const html = buildEmail({ overdue, dueSoon, never, weekOf, thresholds });
+  const html = buildEmail({
+    t1, t2, t3,
+    totalBrokers: brokers.length, totalOverdue, totalSoon, totalNever,
+    weekOf, thresholds,
+  });
 
   const { data, error } = await resend.emails.send({
     from: 'Broker CRM <onboarding@resend.dev>',
@@ -113,59 +122,61 @@ function brokerRow(b, thresholds) {
   const days = daysSince(b.lastContacted);
   const thr  = thresholds[b.tier] || 30;
   const dtu  = daysUntilOverdue(b, thresholds);
-  const tierColor = b.tier === 1 ? '#8b9cf8' : b.tier === 2 ? '#f0a832' : '#8892aa';
 
-  let statusHtml;
-  if (days !== null && days >= thr) {
-    statusHtml = `<span style="color:#e85050">${days - thr}d overdue</span>`;
-  } else if (dtu !== null) {
-    statusHtml = `<span style="color:#f0a832">due in ${dtu}d</span>`;
-  } else {
-    statusHtml = `<span style="color:#5a6480">never contacted</span>`;
-  }
+  const statusHtml = (days !== null && days >= thr)
+    ? `<span style="color:#e85050;font-weight:600">${days - thr}d overdue</span>`
+    : `<span style="color:#f0a832">due in ${dtu}d</span>`;
 
   return `
     <tr style="border-bottom:1px solid #2a2f45">
-      <td style="padding:10px 14px">
+      <td style="padding:10px 14px;width:55%">
         <div style="font-weight:500;color:#dce3f0">${esc(b.name)}</div>
-        <div style="font-size:11px;color:#5a6480">${esc(b.firm)}</div>
+        <div style="font-size:11px;color:#5a6480;margin-top:1px">${esc(b.firm)}</div>
       </td>
-      <td style="padding:10px 14px">
-        <span style="font-size:11px;font-weight:600;color:${tierColor};background:rgba(91,110,245,.15);padding:2px 7px;border-radius:3px">T${b.tier}</span>
-      </td>
-      <td style="padding:10px 14px;font-size:12px;color:#8892aa">${fmtDate(b.lastContacted)}</td>
-      <td style="padding:10px 14px;font-size:12px">${statusHtml}</td>
+      <td style="padding:10px 14px;font-size:12px;color:#8892aa;white-space:nowrap">${fmtDate(b.lastContacted)}</td>
+      <td style="padding:10px 14px;font-size:12px;white-space:nowrap">${statusHtml}</td>
     </tr>`;
 }
 
-function tableSection(title, color, rows, thresholds) {
+function tierSection(label, cadence, color, rows, thresholds) {
   if (rows.length === 0) return '';
   return `
-    <h3 style="margin:24px 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:${color}">${title} (${rows.length})</h3>
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#13161f;border:1px solid #2a2f45;border-radius:5px;border-collapse:collapse">
-      <thead>
-        <tr style="background:#1c2030">
-          <th style="padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480;font-weight:500;border-bottom:1px solid #2a2f45">Broker</th>
-          <th style="padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480;font-weight:500;border-bottom:1px solid #2a2f45">Tier</th>
-          <th style="padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480;font-weight:500;border-bottom:1px solid #2a2f45">Last Contact</th>
-          <th style="padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480;font-weight:500;border-bottom:1px solid #2a2f45">Status</th>
-        </tr>
-      </thead>
-      <tbody>${rows.map(b => brokerRow(b, thresholds)).join('')}</tbody>
-    </table>`;
+    <div style="margin-top:28px">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:${color}">${label}</span>
+        <span style="font-size:11px;color:#5a6480">every ${cadence}d &middot; ${rows.length} need attention</span>
+      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#13161f;border:1px solid #2a2f45;border-radius:5px;border-collapse:collapse">
+        <thead>
+          <tr style="background:#1c2030">
+            <th style="padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480;font-weight:500;border-bottom:1px solid #2a2f45">Broker</th>
+            <th style="padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480;font-weight:500;border-bottom:1px solid #2a2f45">Last Contact</th>
+            <th style="padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480;font-weight:500;border-bottom:1px solid #2a2f45">Status</th>
+          </tr>
+        </thead>
+        <tbody>${rows.map(b => brokerRow(b, thresholds)).join('')}</tbody>
+      </table>
+    </div>`;
 }
 
-function buildEmail({ overdue, dueSoon, never, weekOf, thresholds }) {
-  const neverLine = never.length > 0
-    ? `<p style="margin:8px 0 0;font-size:12px;color:#5a6480">${never.map(b => `${esc(b.name)} (T${b.tier})`).join(' · ')}</p>`
-    : '';
-  const neverSection = never.length > 0
-    ? `<h3 style="margin:24px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480">Never Contacted (${never.length})</h3>${neverLine}`
-    : '';
+function statCard(label, value, color) {
+  return `
+    <td style="padding-right:10px">
+      <div style="background:#13161f;border:1px solid #2a2f45;border-radius:5px;padding:12px 18px;min-width:100px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480;margin-bottom:4px">${label}</div>
+        <div style="font-size:28px;font-weight:700;color:${color}">${value}</div>
+      </div>
+    </td>`;
+}
+
+function buildEmail({ t1, t2, t3, totalBrokers, totalOverdue, totalSoon, totalNever, weekOf, thresholds }) {
+  const wrapOpen  = CRM_URL ? `<a href="${CRM_URL}" style="display:block;text-decoration:none;color:inherit;cursor:pointer">` : '<div>';
+  const wrapClose = CRM_URL ? '</a>' : '</div>';
 
   return `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#0d0f17;font-family:'Courier New',monospace">
+${wrapOpen}
   <div style="max-width:680px;margin:0 auto;padding:32px 24px">
 
     <div style="margin-bottom:28px">
@@ -173,35 +184,28 @@ function buildEmail({ overdue, dueSoon, never, weekOf, thresholds }) {
       <div style="font-size:12px;color:#5a6480;margin-top:4px">Week of ${weekOf}</div>
     </div>
 
-    <table cellpadding="0" cellspacing="0" style="margin-bottom:8px"><tr style="gap:10px">
-      <td style="padding-right:10px">
-        <div style="background:#13161f;border:1px solid #2a2f45;border-radius:5px;padding:12px 18px">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480;margin-bottom:4px">Overdue</div>
-          <div style="font-size:28px;font-weight:700;color:#e85050">${overdue.length}</div>
-        </div>
-      </td>
-      <td style="padding-right:10px">
-        <div style="background:#13161f;border:1px solid #2a2f45;border-radius:5px;padding:12px 18px">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480;margin-bottom:4px">Due This Week</div>
-          <div style="font-size:28px;font-weight:700;color:#f0a832">${dueSoon.length}</div>
-        </div>
-      </td>
-      <td>
-        <div style="background:#13161f;border:1px solid #2a2f45;border-radius:5px;padding:12px 18px">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#5a6480;margin-bottom:4px">Never Contacted</div>
-          <div style="font-size:28px;font-weight:700;color:#5a6480">${never.length}</div>
-        </div>
-      </td>
+    <table cellpadding="0" cellspacing="0"><tr>
+      ${statCard('Total', totalBrokers, '#dce3f0')}
+      ${statCard('Overdue', totalOverdue, '#e85050')}
+      ${statCard('Due Soon', totalSoon, '#f0a832')}
+      ${statCard('Never', totalNever, '#5a6480')}
     </tr></table>
 
-    ${tableSection('Needs Outreach Now', '#e85050', overdue, thresholds)}
-    ${tableSection('Due This Week', '#f0a832', dueSoon, thresholds)}
-    ${neverSection}
+    ${tierSection('Tier 1', thresholds[1] || 14, '#8b9cf8', t1, thresholds)}
+    ${tierSection('Tier 2', thresholds[2] || 30, '#f0a832', t2, thresholds)}
+    ${tierSection('Tier 3', thresholds[3] || 60, '#8892aa', t3, thresholds)}
+
+    ${(t1.length + t2.length + t3.length === 0)
+      ? '<p style="margin-top:32px;font-size:13px;color:#22c47a">&#10003; All brokers are up to date this week.</p>'
+      : ''}
 
     <div style="margin-top:32px;padding-top:18px;border-top:1px solid #2a2f45;font-size:11px;color:#5a6480">
       Generated by Broker CRM &middot; ${new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}
+      ${CRM_URL ? `&middot; <span style="color:#5b6ef5">Open CRM →</span>` : ''}
     </div>
+
   </div>
+${wrapClose}
 </body></html>`;
 }
 
