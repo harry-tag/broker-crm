@@ -106,7 +106,7 @@
     /* ── Stats bar ───────────────────────────────── */
     .stats-bar {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 10px;
       margin-bottom: 18px;
     }
@@ -124,10 +124,12 @@
       margin-bottom: 6px;
     }
     .stat-value { font-size: 30px; font-weight: 700; line-height: 1; }
-    .stat-card.s-total   .stat-value { color: var(--text); }
-    .stat-card.s-overdue .stat-value { color: var(--red); }
-    .stat-card.s-soon    .stat-value { color: var(--yellow); }
-    .stat-card.s-ok      .stat-value { color: var(--green); }
+    .stat-value.stat-value-sm { font-size: 20px; }
+    .stat-card.s-total    .stat-value { color: var(--text); }
+    .stat-card.s-overdue  .stat-value { color: var(--red); }
+    .stat-card.s-soon     .stat-value { color: var(--yellow); }
+    .stat-card.s-ok       .stat-value { color: var(--green); }
+    .stat-card.s-pipeline .stat-value { color: var(--accent); }
 
     /* ── Toolbar ─────────────────────────────────── */
     .toolbar {
@@ -230,6 +232,7 @@
     .ds-ioi         { background: rgba(91,110,245,.18);  color: #8b9cf8; }
     .ds-loi         { background: rgba(240,168,50,.15);  color: #f0a832; }
     .ds-dd          { background: rgba(34,196,122,.12);  color: #22c47a; }
+    .ds-closed-won  { background: rgba(34,196,122,.2);   color: #22c47a; border: 1px solid rgba(34,196,122,.3); }
     .ds-closed-lost { background: rgba(232,80,80,.12);   color: #e85050; }
 
     .plat-tag {
@@ -330,6 +333,9 @@
     ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
     /* ── Responsive ──────────────────────────────── */
+    @media (max-width: 900px) {
+      .stats-bar { grid-template-columns: repeat(3, 1fr); }
+    }
     @media (max-width: 700px) {
       .stats-bar { grid-template-columns: 1fr 1fr; }
       .header-right .btn-outline { display: none; }
@@ -373,6 +379,10 @@
     <div class="stat-card s-ok">
       <div class="stat-label">Up to Date</div>
       <div class="stat-value" id="s-ok">0</div>
+    </div>
+    <div class="stat-card s-pipeline">
+      <div class="stat-label">Active Pipeline</div>
+      <div class="stat-value stat-value-sm" id="s-pipeline">—</div>
     </div>
   </div>
 
@@ -542,6 +552,7 @@
             <option value="ioi">IOI</option>
             <option value="loi">LOI</option>
             <option value="dd">DD</option>
+            <option value="closed_won">Closed Won</option>
             <option value="closed_lost">Closed Lost</option>
           </select>
         </div>
@@ -549,6 +560,13 @@
           <label>Notes</label>
           <input type="text" id="deal-f-notes" placeholder="Optional context">
         </div>
+      </div>
+      <div class="field-row" style="margin-top:0">
+        <div class="field">
+          <label>Buyable Revenue ($)</label>
+          <input type="number" id="deal-f-revenue" min="0" placeholder="e.g. 5000000">
+        </div>
+        <div class="field"></div>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px">
         <button class="btn btn-outline" id="deal-cancel">Cancel</button>
@@ -735,6 +753,13 @@ function fmtDate(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
 }
+function fmtRevenue(n) {
+  if (!n) return null;
+  if (n >= 1e9) return '$' + (n / 1e9).toFixed(1) + 'B';
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return '$' + Math.round(n / 1e3) + 'k';
+  return '$' + n.toLocaleString();
+}
 
 // ── Render ────────────────────────────────────────────────────
 const ORDER = { overdue:0, soon:1, fresh:2, never:3 };
@@ -760,10 +785,17 @@ function render() {
   // stats (over full dataset, not filtered)
   const counts = { overdue:0, soon:0, fresh:0, never:0 };
   brokers.forEach(b => counts[statusOf(b)]++);
-  document.getElementById('s-total').textContent   = brokers.length;
-  document.getElementById('s-overdue').textContent = counts.overdue;
-  document.getElementById('s-soon').textContent    = counts.soon;
-  document.getElementById('s-ok').textContent      = counts.fresh;
+
+  const ACTIVE_STAGES = new Set(['early','ioi','loi','dd']);
+  const pipeline = brokers.reduce((sum, b) =>
+    sum + (b.deals || []).reduce((s, d) =>
+      ACTIVE_STAGES.has(d.status) ? s + (Number(d.revenue) || 0) : s, 0), 0);
+
+  document.getElementById('s-total').textContent    = brokers.length;
+  document.getElementById('s-overdue').textContent  = counts.overdue;
+  document.getElementById('s-soon').textContent     = counts.soon;
+  document.getElementById('s-ok').textContent       = counts.fresh;
+  document.getElementById('s-pipeline').textContent = pipeline > 0 ? fmtRevenue(pipeline) : '—';
 
   const tbody = document.getElementById('tbody');
   const empty = document.getElementById('empty-state');
@@ -1048,8 +1080,9 @@ document.addEventListener('keydown', e => {
 });
 
 // ── Deals modal ───────────────────────────────────────────────
-const DEAL_LABELS = { early: 'Early', ioi: 'IOI', loi: 'LOI', dd: 'DD', closed_lost: 'Closed Lost' };
-const DEAL_CLASS  = { early: 'ds-early', ioi: 'ds-ioi', loi: 'ds-loi', dd: 'ds-dd', closed_lost: 'ds-closed-lost' };
+const DEAL_LABELS = { early: 'Early', ioi: 'IOI', loi: 'LOI', dd: 'DD', closed_won: 'Closed Won', closed_lost: 'Closed Lost' };
+const DEAL_CLASS  = { early: 'ds-early', ioi: 'ds-ioi', loi: 'ds-loi', dd: 'ds-dd', closed_won: 'ds-closed-won', closed_lost: 'ds-closed-lost' };
+const ACTIVE_DEAL_STAGES = new Set(['early','ioi','loi','dd']);
 
 function openDealsModal(id) {
   dealsBroker = brokers.find(b => b.id === id);
@@ -1063,6 +1096,7 @@ function openDealsModal(id) {
   document.getElementById('deal-f-date').value    = new Date().toISOString().slice(0, 10);
   document.getElementById('deal-f-status').value  = 'early';
   document.getElementById('deal-f-notes').value   = '';
+  document.getElementById('deal-f-revenue').value = '';
 
   renderDealStats();
   renderDealsList();
@@ -1078,18 +1112,23 @@ function renderDealStats() {
   const deals       = dealsBroker.deals || [];
   const thisYear    = new Date().getFullYear();
   const countYear   = deals.filter(d => d.date && new Date(d.date).getFullYear() === thisYear).length;
-  const countActive = deals.filter(d => ['early','ioi','loi','dd'].includes(d.status)).length;
+  const active      = deals.filter(d => ACTIVE_DEAL_STAGES.has(d.status));
+  const won         = deals.filter(d => d.status === 'closed_won');
+  const pipelineVal = active.reduce((s, d) => s + (Number(d.revenue) || 0), 0);
+  const wonVal      = won.reduce((s, d) => s + (Number(d.revenue) || 0), 0);
 
   const stat = (label, val, color) => `
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px;min-width:80px">
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);margin-bottom:2px">${label}</div>
-      <div style="font-size:22px;font-weight:700;color:${color}">${val}</div>
+      <div style="font-size:${typeof val === 'string' && val.startsWith('$') ? '16' : '22'}px;font-weight:700;color:${color};line-height:1.2">${val}</div>
     </div>`;
 
   document.getElementById('deals-stats').innerHTML = [
     stat('Total', deals.length, 'var(--text)'),
     stat('This Year', countYear, 'var(--accent)'),
-    stat('Active', countActive, 'var(--green)'),
+    stat('Active', active.length, 'var(--green)'),
+    pipelineVal > 0 ? stat('Pipeline', fmtRevenue(pipelineVal), 'var(--accent)') : '',
+    wonVal      > 0 ? stat('Won',      fmtRevenue(wonVal),      'var(--green)')  : '',
   ].join('');
 }
 
@@ -1102,12 +1141,15 @@ function renderDealsList() {
     return;
   }
 
-  list.innerHTML = deals.map(d => `
+  list.innerHTML = deals.map(d => {
+    const rev = fmtRevenue(Number(d.revenue) || 0);
+    return `
     <div style="padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
         <div style="display:flex;align-items:center;gap:8px;min-width:0">
           <span style="font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name)}</span>
           <span class="status-badge ${DEAL_CLASS[d.status] || 'ds-early'}" style="font-size:10px;white-space:nowrap">${DEAL_LABELS[d.status] || d.status}</span>
+          ${rev ? `<span style="font-size:11px;color:var(--accent);font-weight:600">${rev}</span>` : ''}
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
           <span style="font-size:11px;color:var(--text-muted)">${fmtDate(d.date)}</span>
@@ -1115,7 +1157,7 @@ function renderDealsList() {
         </div>
       </div>
       ${d.notes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(d.notes)}</div>` : ''}
-    </div>`).join('');
+    </div>`}).join('');
 }
 
 function deleteDeal(dealId) {
@@ -1137,15 +1179,16 @@ document.getElementById('deal-cancel').onclick = () => {
 
 document.getElementById('deal-save').onclick = () => {
   if (!dealsBroker) return;
-  const name   = document.getElementById('deal-f-name').value.trim();
-  const date   = document.getElementById('deal-f-date').value;
-  const status = document.getElementById('deal-f-status').value;
-  const notes  = document.getElementById('deal-f-notes').value.trim();
+  const name    = document.getElementById('deal-f-name').value.trim();
+  const date    = document.getElementById('deal-f-date').value;
+  const status  = document.getElementById('deal-f-status').value;
+  const notes   = document.getElementById('deal-f-notes').value.trim();
+  const revenue = parseFloat(document.getElementById('deal-f-revenue').value) || null;
   if (!name) { alert('Deal name is required.'); return; }
   if (!date) { alert('Date is required.'); return; }
 
   if (!dealsBroker.deals) dealsBroker.deals = [];
-  dealsBroker.deals.push({ id: uuid(), name, date, status, notes });
+  dealsBroker.deals.push({ id: uuid(), name, date, status, notes, revenue });
 
   if (!dealsBroker.lastContacted || date > dealsBroker.lastContacted) {
     dealsBroker.lastContacted = date;
@@ -1153,10 +1196,11 @@ document.getElementById('deal-save').onclick = () => {
 
   saveBroker(dealsBroker); renderDealStats(); renderDealsList(); render();
 
-  document.getElementById('deal-f-name').value   = '';
-  document.getElementById('deal-f-date').value   = new Date().toISOString().slice(0, 10);
-  document.getElementById('deal-f-status').value = 'early';
-  document.getElementById('deal-f-notes').value  = '';
+  document.getElementById('deal-f-name').value    = '';
+  document.getElementById('deal-f-date').value    = new Date().toISOString().slice(0, 10);
+  document.getElementById('deal-f-status').value  = 'early';
+  document.getElementById('deal-f-notes').value   = '';
+  document.getElementById('deal-f-revenue').value = '';
   document.getElementById('deals-add-form').style.display = 'none';
 };
 
