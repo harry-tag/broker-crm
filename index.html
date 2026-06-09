@@ -45,6 +45,24 @@
       min-height: 100vh;
     }
 
+    /* ── Toast ───────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      font-size: 12px;
+      font-family: var(--font);
+      z-index: 999;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .2s;
+    }
+    #toast.show { opacity: 1; }
+    #toast.toast-err  { background: rgba(232,80,80,.15); border: 1px solid var(--red);   color: var(--red); }
+    #toast.toast-ok   { background: rgba(34,196,122,.12); border: 1px solid var(--green); color: var(--green); }
+
     /* ── Header ─────────────────────────────────── */
     header {
       background: var(--surface);
@@ -613,6 +631,9 @@
 <!-- Hidden CSV file input -->
 <input type="file" id="csv-input" accept=".csv,.txt">
 
+<!-- Toast notifications -->
+<div id="toast"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
 <!-- ── Script ───────────────────────────────────────────────── -->
@@ -693,22 +714,39 @@ async function loadAll() {
   document.getElementById('btn-theme').textContent = theme === 'dark' ? '☾' : '☀';
 }
 
+let _toastTimer;
+function toast(msg, type = 'err') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show toast-${type}`;
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.className = ''; }, type === 'err' ? 5000 : 2000);
+}
+
 async function saveBroker(b) {
   const { error } = await supa.from('brokers').upsert(brokerToDb(b));
-  if (error) console.error('Save failed:', error);
+  if (error) {
+    console.error('Save failed:', error);
+    toast(`Save failed: ${error.message}`);
+  }
 }
 
 async function deleteBrokerDb(id) {
   const { error } = await supa.from('brokers').delete().eq('id', id);
-  if (error) { alert('Delete failed. Please refresh.'); await loadAll(); render(); }
+  if (error) {
+    toast(`Delete failed: ${error.message}`);
+    await loadAll(); render();
+  }
 }
 
 async function saveThresholds() {
-  await supa.from('settings').upsert({ key: 'thresholds', value: thresholds });
+  const { error } = await supa.from('settings').upsert({ key: 'thresholds', value: thresholds });
+  if (error) toast(`Failed to save thresholds: ${error.message}`);
 }
 
 async function saveDigest() {
-  await supa.from('settings').upsert({ key: 'digest', value: digestSettings });
+  const { error } = await supa.from('settings').upsert({ key: 'digest', value: digestSettings });
+  if (error) toast(`Failed to save digest settings: ${error.message}`);
 }
 
 // ── Real-time ─────────────────────────────────────────────────
