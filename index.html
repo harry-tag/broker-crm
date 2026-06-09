@@ -405,6 +405,9 @@
       <option value="fresh">Fresh</option>
       <option value="never">Never Contacted</option>
     </select>
+    <select class="filter-select" id="filter-geo">
+      <option value="">All Geographies</option>
+    </select>
   </div>
 
   <!-- Table -->
@@ -414,6 +417,7 @@
         <tr>
           <th>Name</th>
           <th>Firm</th>
+          <th>Geography</th>
           <th>Tier</th>
           <th>Platform</th>
           <th>Deals</th>
@@ -464,6 +468,10 @@
           <label>Platform</label>
           <input type="text" id="f-platform" placeholder="Axial, Dealsuite…">
         </div>
+      </div>
+      <div class="field">
+        <label>Geography</label>
+        <input type="text" id="f-geography" placeholder="Northeast, Southeast, Midwest…">
       </div>
       <div class="field">
         <label>Email</label>
@@ -629,6 +637,7 @@ let dealsBroker    = null;
 let search     = '';
 let filterTier = '';
 let filterSt   = '';
+let filterGeo  = '';
 
 // ── DB mapping ────────────────────────────────────────────────
 function dbToBroker(row) {
@@ -638,6 +647,7 @@ function dbToBroker(row) {
     firm:          row.firm,
     tier:          row.tier,
     platform:      row.platform       || '',
+    geography:     row.geography      || '',
     email:         row.email          || '',
     lastContacted: row.last_contacted || null,
     notes:         row.notes          || '',
@@ -652,6 +662,7 @@ function brokerToDb(b) {
     firm:           b.firm,
     tier:           b.tier,
     platform:       b.platform      || null,
+    geography:      b.geography     || null,
     email:          b.email         || null,
     last_contacted: b.lastContacted || null,
     notes:          b.notes         || null,
@@ -766,11 +777,19 @@ const ORDER = { overdue:0, soon:1, fresh:2, never:3 };
 
 function render() {
   // filter
+  // keep geo filter options in sync with current data
+  const geos = [...new Set(brokers.map(b => b.geography).filter(Boolean))].sort();
+  const geoEl = document.getElementById('filter-geo');
+  const prevGeo = geoEl.value;
+  geoEl.innerHTML = '<option value="">All Geographies</option>' +
+    geos.map(g => `<option value="${g}"${g === prevGeo ? ' selected' : ''}>${esc(g)}</option>`).join('');
+
   const q = search.toLowerCase();
   const rows = brokers.filter(b => {
     if (q && !b.name.toLowerCase().includes(q) && !b.firm.toLowerCase().includes(q)) return false;
     if (filterTier && String(b.tier) !== filterTier) return false;
     if (filterSt   && statusOf(b) !== filterSt)     return false;
+    if (filterGeo  && b.geography !== filterGeo)    return false;
     return true;
   });
 
@@ -822,6 +841,7 @@ function render() {
           ${b.email ? `<div class="cell-sub">${esc(b.email)}</div>` : ''}
         </td>
         <td>${esc(b.firm)}</td>
+        <td>${b.geography ? `<span class="plat-tag">${esc(b.geography)}</span>` : '<span style="color:var(--text-muted)">—</span>'}</td>
         <td><span class="badge badge-t${b.tier}">T${b.tier}</span></td>
         <td>${b.platform ? `<span class="plat-tag">${esc(b.platform)}</span>` : '<span style="color:var(--text-muted)">—</span>'}</td>
         <td>
@@ -873,13 +893,14 @@ function openEdit(id) {
 function openBrokerModal(b) {
   const editing = !!b;
   document.getElementById('broker-modal-title').textContent = editing ? 'Edit Broker' : 'Add Broker';
-  document.getElementById('f-id').value       = b ? b.id : '';
-  document.getElementById('f-name').value     = b ? b.name       || '' : '';
-  document.getElementById('f-firm').value     = b ? b.firm       || '' : '';
-  document.getElementById('f-platform').value = b ? b.platform   || '' : '';
-  document.getElementById('f-email').value    = b ? b.email      || '' : '';
-  document.getElementById('f-lc').value       = b ? b.lastContacted || '' : '';
-  document.getElementById('f-notes').value    = b ? b.notes      || '' : '';
+  document.getElementById('f-id').value        = b ? b.id : '';
+  document.getElementById('f-name').value      = b ? b.name        || '' : '';
+  document.getElementById('f-firm').value      = b ? b.firm        || '' : '';
+  document.getElementById('f-platform').value  = b ? b.platform    || '' : '';
+  document.getElementById('f-geography').value = b ? b.geography   || '' : '';
+  document.getElementById('f-email').value     = b ? b.email       || '' : '';
+  document.getElementById('f-lc').value        = b ? b.lastContacted || '' : '';
+  document.getElementById('f-notes').value     = b ? b.notes       || '' : '';
 
   // Rebuild tier options with current thresholds
   const sel = document.getElementById('f-tier');
@@ -915,6 +936,7 @@ document.getElementById('broker-form').onsubmit = e => {
   const data = {
     name, firm, tier,
     platform:      document.getElementById('f-platform').value.trim(),
+    geography:     document.getElementById('f-geography').value.trim(),
     email:         document.getElementById('f-email').value.trim(),
     lastContacted: document.getElementById('f-lc').value || null,
     notes:         document.getElementById('f-notes').value.trim(),
@@ -962,7 +984,7 @@ document.getElementById('thresh-save').onclick = () => {
 
 // ── CSV export ────────────────────────────────────────────────
 document.getElementById('btn-export').onclick = () => {
-  const COLS = ['id','name','firm','tier','email','platform','lastContacted','notes'];
+  const COLS = ['id','name','firm','tier','geography','email','platform','lastContacted','notes'];
   const q = v => `"${String(v ?? '').replace(/"/g,'""')}"`;
   const lines = [COLS.join(','), ...brokers.map(b => COLS.map(c => q(b[c])).join(','))];
   const blob = new Blob([lines.join('\r\n')], { type:'text/csv' });
@@ -1030,16 +1052,18 @@ function importCSV(text) {
     for (const k of lcKeys) { lc = get(row, k); if (lc) break; }
 
     if (existing) {
-      if (tier)                  existing.tier     = tier;
-      if (get(row,'email'))      existing.email    = get(row,'email');
-      if (get(row,'platform'))   existing.platform = get(row,'platform');
-      if (get(row,'notes'))      existing.notes    = get(row,'notes');
+      if (tier)                    existing.tier      = tier;
+      if (get(row,'email'))        existing.email     = get(row,'email');
+      if (get(row,'platform'))     existing.platform  = get(row,'platform');
+      if (get(row,'geography'))    existing.geography = get(row,'geography');
+      if (get(row,'notes'))        existing.notes     = get(row,'notes');
       changed.push(existing);
       updated++;
     } else {
       const b = {
         id:            uuid(),
         name, firm, tier,
+        geography:     get(row,'geography'),
         email:         get(row,'email'),
         platform:      get(row,'platform'),
         lastContacted: lc || null,
@@ -1060,6 +1084,7 @@ function importCSV(text) {
 document.getElementById('search').oninput        = e => { search     = e.target.value; render(); };
 document.getElementById('filter-tier').onchange  = e => { filterTier = e.target.value; render(); };
 document.getElementById('filter-status').onchange= e => { filterSt   = e.target.value; render(); };
+document.getElementById('filter-geo').onchange   = e => { filterGeo  = e.target.value; render(); };
 
 // ── Theme toggle ──────────────────────────────────────────────
 document.getElementById('btn-theme').onclick = () => {
