@@ -216,6 +216,9 @@
 
     .cell-name { font-weight: 500; }
     .cell-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+    .cell-link { cursor: pointer; }
+    .cell-link:hover { color: var(--accent); }
+    .firm-row:hover td { background: var(--surface2); }
 
     .badge {
       display: inline-flex; align-items: center; gap: 4px;
@@ -628,6 +631,20 @@
   </div>
 </div>
 
+<!-- ── Broker detail modal ───────────────────────────────────── -->
+<div class="modal-backdrop" id="broker-detail-modal" style="display:none">
+  <div class="modal" style="width:660px">
+    <div id="broker-detail-content"></div>
+  </div>
+</div>
+
+<!-- ── Firm modal ────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="firm-modal" style="display:none">
+  <div class="modal" style="width:560px">
+    <div id="firm-modal-content"></div>
+  </div>
+</div>
+
 <!-- Hidden CSV file input -->
 <input type="file" id="csv-input" accept=".csv,.txt">
 
@@ -875,10 +892,10 @@ function render() {
     return `
       <tr>
         <td>
-          <div class="cell-name">${esc(b.name)}</div>
+          <div class="cell-name cell-link" onclick="openBrokerDetail('${b.id}')">${esc(b.name)}</div>
           ${b.email ? `<div class="cell-sub">${esc(b.email)}</div>` : ''}
         </td>
-        <td>${esc(b.firm)}</td>
+        <td><span class="cell-link" onclick="openFirmModal(${esc(JSON.stringify(b.firm))})">${esc(b.firm)}</span></td>
         <td>${b.geography ? `<span class="plat-tag">${esc(b.geography)}</span>` : '<span style="color:var(--text-muted)">—</span>'}</td>
         <td><span class="badge badge-t${b.tier}">T${b.tier}</span></td>
         <td>${b.platform ? `<span class="plat-tag">${esc(b.platform)}</span>` : '<span style="color:var(--text-muted)">—</span>'}</td>
@@ -1135,7 +1152,7 @@ document.getElementById('btn-theme').onclick = () => {
 
 // ── Keyboard shortcuts ────────────────────────────────────────
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeBrokerModal(); closeThresholdModal(); }
+  if (e.key === 'Escape') { closeBrokerModal(); closeThresholdModal(); closeBrokerDetail(); closeFirmModal(); }
   if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey) {
     if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
     openBrokerModal(null);
@@ -1269,6 +1286,205 @@ document.getElementById('deal-save').onclick = () => {
 
 document.getElementById('deals-close').onclick = closeDealsModal;
 document.getElementById('deals-modal').onclick  = e => { if (e.target === e.currentTarget) closeDealsModal(); };
+
+// ── Broker detail modal ───────────────────────────────────────
+function normalizeFirm(name) {
+  return (name || '').replace(/\s*[\(\-–].*/,'').trim().toLowerCase();
+}
+
+function openBrokerDetail(id) {
+  const b = brokers.find(x => x.id === id);
+  if (!b) return;
+
+  const st      = statusOf(b);
+  const stLabel = { fresh:'Fresh', soon:'Due Soon', overdue:'Overdue', never:'Never Contacted' }[st];
+  const stClass = { fresh:'s-fresh', soon:'s-soon', overdue:'s-overdue', never:'s-never' }[st];
+  const days    = daysSince(b.lastContacted);
+  const tierColors = { 1:'var(--accent)', 2:'var(--yellow)', 3:'var(--gray)' };
+  const tierLabel  = [``, `T1 · every ${thresholds[1]}d`, `T2 · every ${thresholds[2]}d`, `T3 · every ${thresholds[3]}d`][b.tier] || '';
+
+  const deals      = [...(b.deals || [])].sort((a, bk) => (bk.date||'').localeCompare(a.date||''));
+  const active     = deals.filter(d => ACTIVE_DEAL_STAGES.has(d.status));
+  const won        = deals.filter(d => d.status === 'closed_won');
+  const pipeline   = active.reduce((s, d) => s + (Number(d.revenue)||0), 0);
+  const wonVal     = won.reduce((s, d) => s + (Number(d.revenue)||0), 0);
+
+  const miniStat = (label, val, color) => `
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);margin-bottom:2px">${label}</div>
+      <div style="font-size:${String(val).startsWith('$')?'15':'20'}px;font-weight:700;color:${color};line-height:1.2">${val}</div>
+    </div>`;
+
+  const dealsHtml = deals.length === 0
+    ? '<div style="padding:20px 0;text-align:center;color:var(--text-muted);font-size:12px">No deals logged yet.</div>'
+    : deals.map(d => {
+        const rev = fmtRevenue(Number(d.revenue)||0);
+        return `
+        <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div style="display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap">
+              <span style="font-weight:500;color:var(--text)">${esc(d.name)}</span>
+              <span class="status-badge ${DEAL_CLASS[d.status]||'ds-early'}" style="font-size:10px">${DEAL_LABELS[d.status]||d.status}</span>
+              ${rev ? `<span style="font-size:11px;color:var(--accent);font-weight:600">${rev}</span>` : ''}
+            </div>
+            <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">${fmtDate(d.date)}</span>
+          </div>
+          ${d.notes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(d.notes)}</div>` : ''}
+        </div>`;
+      }).join('');
+
+  document.getElementById('broker-detail-content').innerHTML = `
+    <div class="modal-hdr" style="align-items:flex-start">
+      <div style="min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+          <div class="modal-title">${esc(b.name)}</div>
+          <span style="font-size:11px;font-weight:600;color:${tierColors[b.tier]};background:rgba(91,110,245,.12);padding:2px 8px;border-radius:3px">${tierLabel}</span>
+          <span class="status-badge ${stClass}" style="font-size:10px">${stLabel}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted)">
+          <span class="cell-link" onclick="closeBrokerDetail();openFirmModal(${esc(JSON.stringify(b.firm))})">${esc(b.firm)}</span>
+          ${b.geography ? ` &middot; ${esc(b.geography)}` : ''}
+          ${b.platform  ? ` &middot; <span style="color:var(--text-sub)">${esc(b.platform)}</span>` : ''}
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;margin-left:12px">
+        <button class="btn btn-outline" onclick="closeBrokerDetail();logToday('${b.id}')">Log Today</button>
+        <button class="btn btn-outline" onclick="closeBrokerDetail();openEdit('${b.id}')">Edit</button>
+        <button class="modal-x" onclick="closeBrokerDetail()">×</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;font-size:12px">
+      <div>
+        <div style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px">Last Contacted</div>
+        <div style="color:var(--text)">${fmtDate(b.lastContacted)}${days !== null ? `<span style="color:var(--text-muted)"> · ${days}d ago</span>` : ''}</div>
+      </div>
+      ${b.email ? `<div>
+        <div style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px">Email</div>
+        <a href="mailto:${esc(b.email)}" style="color:var(--accent);text-decoration:none">${esc(b.email)}</a>
+      </div>` : ''}
+    </div>
+
+    ${b.notes ? `<div style="margin-bottom:16px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:5px">Notes</div>
+      <div style="font-size:12px;color:var(--text-sub);line-height:1.6;white-space:pre-wrap">${esc(b.notes)}</div>
+    </div>` : ''}
+
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      ${miniStat('Deals', deals.length, 'var(--text)')}
+      ${miniStat('Active', active.length, 'var(--green)')}
+      ${pipeline > 0 ? miniStat('Pipeline', fmtRevenue(pipeline), 'var(--accent)') : ''}
+      ${wonVal   > 0 ? miniStat('Won',      fmtRevenue(wonVal),   'var(--green)')  : ''}
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted)">Deal History</div>
+      <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="closeBrokerDetail();openDealsModal('${b.id}')">+ Log Deal</button>
+    </div>
+    <div>${dealsHtml}</div>
+  `;
+
+  document.getElementById('broker-detail-modal').style.display = 'flex';
+}
+
+function closeBrokerDetail() {
+  document.getElementById('broker-detail-modal').style.display = 'none';
+}
+
+document.getElementById('broker-detail-modal').onclick = e => { if (e.target === e.currentTarget) closeBrokerDetail(); };
+
+// ── Firm modal ─────────────────────────────────────────────────
+function openFirmModal(firmName) {
+  const base        = normalizeFirm(firmName);
+  const firmBrokers = brokers
+    .filter(b => normalizeFirm(b.firm) === base)
+    .sort((a, bk) => {
+      const oa = ORDER[statusOf(a)], ob = ORDER[statusOf(bk)];
+      return oa !== ob ? oa - ob : a.tier - bk.tier;
+    });
+
+  if (firmBrokers.length === 0) return;
+
+  const displayName = firmBrokers[0].firm.replace(/\s*[\(\-–].*/,'').trim();
+  const isGrouped   = firmBrokers.some(b => b.firm !== firmBrokers[0].firm);
+  const allDeals    = firmBrokers.flatMap(b => b.deals || []);
+  const activeDeals = allDeals.filter(d => ACTIVE_DEAL_STAGES.has(d.status));
+  const pipeline    = activeDeals.reduce((s, d) => s + (Number(d.revenue)||0), 0);
+
+  const miniStat = (label, val, color) => `
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);margin-bottom:2px">${label}</div>
+      <div style="font-size:${String(val).startsWith('$')?'15':'20'}px;font-weight:700;color:${color};line-height:1.2">${val}</div>
+    </div>`;
+
+  const tierColors = { 1:'#8b9cf8', 2:'#f0a832', 3:'#8892aa' };
+  const stLabels   = { fresh:'Fresh', soon:'Due Soon', overdue:'Overdue', never:'Never' };
+  const stClasses  = { fresh:'s-fresh', soon:'s-soon', overdue:'s-overdue', never:'s-never' };
+
+  const rows = firmBrokers.map(b => {
+    const st       = statusOf(b);
+    const dealCount = (b.deals||[]).length;
+    const bPipeline = (b.deals||[]).filter(d => ACTIVE_DEAL_STAGES.has(d.status)).reduce((s,d)=>s+(Number(d.revenue)||0),0);
+    return `
+      <tr class="firm-row" style="cursor:pointer" onclick="closeFirmModal();openBrokerDetail('${b.id}')">
+        <td style="padding:10px 14px">
+          <div style="font-weight:500;color:var(--text)">${esc(b.name)}</div>
+          ${b.geography ? `<div style="font-size:11px;color:var(--text-muted)">${esc(b.geography)}</div>` : ''}
+        </td>
+        <td style="padding:10px 14px">
+          <span style="font-size:11px;font-weight:600;color:${tierColors[b.tier]||'#8892aa'};background:rgba(91,110,245,.12);padding:2px 7px;border-radius:3px">T${b.tier}</span>
+        </td>
+        <td style="padding:10px 14px">
+          <span class="status-badge ${stClasses[st]}" style="font-size:10px">${stLabels[st]}</span>
+        </td>
+        <td style="padding:10px 14px;font-size:12px">
+          ${dealCount > 0
+            ? `<span style="color:var(--accent)">${dealCount} deal${dealCount!==1?'s':''}</span>${bPipeline>0?` <span style="color:var(--text-muted)">· ${fmtRevenue(bPipeline)}</span>`:''}`
+            : '<span style="color:var(--text-muted)">—</span>'}
+        </td>
+      </tr>`;
+  }).join('');
+
+  document.getElementById('firm-modal-content').innerHTML = `
+    <div class="modal-hdr">
+      <div>
+        <div class="modal-title">${esc(displayName)}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
+          ${firmBrokers.length} contact${firmBrokers.length!==1?'s':''}
+          ${isGrouped ? ' · grouped by base firm name' : ''}
+        </div>
+      </div>
+      <button class="modal-x" onclick="closeFirmModal()">×</button>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      ${miniStat('Contacts', firmBrokers.length, 'var(--text)')}
+      ${miniStat('Total Deals', allDeals.length, 'var(--accent)')}
+      ${miniStat('Active', activeDeals.length, 'var(--green)')}
+      ${pipeline > 0 ? miniStat('Pipeline', fmtRevenue(pipeline), 'var(--accent)') : ''}
+    </div>
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid var(--border);border-radius:var(--radius);border-collapse:collapse;overflow:hidden">
+      <thead>
+        <tr style="background:var(--surface2)">
+          <th style="padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);border-bottom:1px solid var(--border)">Contact</th>
+          <th style="padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);border-bottom:1px solid var(--border)">Tier</th>
+          <th style="padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);border-bottom:1px solid var(--border)">Status</th>
+          <th style="padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);border-bottom:1px solid var(--border)">Deals</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  document.getElementById('firm-modal').style.display = 'flex';
+}
+
+function closeFirmModal() {
+  document.getElementById('firm-modal').style.display = 'none';
+}
+
+document.getElementById('firm-modal').onclick = e => { if (e.target === e.currentTarget) closeFirmModal(); };
 
 // ── Digest modal ──────────────────────────────────────────────
 function openDigestModal() {
