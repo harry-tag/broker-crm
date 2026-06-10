@@ -124,7 +124,7 @@
     /* ── Stats bar ───────────────────────────────── */
     .stats-bar {
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(6, 1fr);
       gap: 10px;
       margin-bottom: 18px;
     }
@@ -148,6 +148,14 @@
     .stat-card.s-soon     .stat-value { color: var(--yellow); }
     .stat-card.s-ok       .stat-value { color: var(--green); }
     .stat-card.s-pipeline .stat-value { color: var(--accent); }
+    .stat-card.s-theft    .stat-value { color: #e85050; }
+    .stat-card { cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+    .stat-card:hover { border-color: rgba(91,110,245,.45); }
+    .stat-card.stat-active                  { box-shadow: 0 0 0 2px var(--accent); border-color: var(--accent); }
+    .stat-card.s-overdue.stat-active        { box-shadow: 0 0 0 2px var(--red);    border-color: var(--red); }
+    .stat-card.s-soon.stat-active           { box-shadow: 0 0 0 2px var(--yellow); border-color: var(--yellow); }
+    .stat-card.s-ok.stat-active             { box-shadow: 0 0 0 2px var(--green);  border-color: var(--green); }
+    .stat-card.s-theft.stat-active          { box-shadow: 0 0 0 2px #e85050;       border-color: #e85050; }
 
     /* ── Toolbar ─────────────────────────────────── */
     .toolbar {
@@ -354,6 +362,9 @@
     ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
     /* ── Responsive ──────────────────────────────── */
+    @media (max-width: 1200px) {
+      .stats-bar { grid-template-columns: repeat(3, 1fr); }
+    }
     @media (max-width: 900px) {
       .stats-bar { grid-template-columns: repeat(3, 1fr); }
     }
@@ -385,25 +396,29 @@
 
   <!-- Stats -->
   <div class="stats-bar">
-    <div class="stat-card s-total">
+    <div class="stat-card s-total" onclick="setStatFilter('total')">
       <div class="stat-label">Total Brokers</div>
       <div class="stat-value" id="s-total">0</div>
     </div>
-    <div class="stat-card s-overdue">
+    <div class="stat-card s-overdue" onclick="setStatFilter('overdue')">
       <div class="stat-label">Needs Outreach</div>
       <div class="stat-value" id="s-overdue">0</div>
     </div>
-    <div class="stat-card s-soon">
+    <div class="stat-card s-soon" onclick="setStatFilter('soon')">
       <div class="stat-label">Due Soon</div>
       <div class="stat-value" id="s-soon">0</div>
     </div>
-    <div class="stat-card s-ok">
+    <div class="stat-card s-ok" onclick="setStatFilter('fresh')">
       <div class="stat-label">Up to Date</div>
       <div class="stat-value" id="s-ok">0</div>
     </div>
-    <div class="stat-card s-pipeline">
+    <div class="stat-card s-pipeline" onclick="setStatFilter('pipeline')">
       <div class="stat-label">Active Pipeline</div>
       <div class="stat-value stat-value-sm" id="s-pipeline">—</div>
+    </div>
+    <div class="stat-card s-theft" onclick="setStatFilter('theft')">
+      <div class="stat-label">Thefts</div>
+      <div class="stat-value" id="s-thefts">0</div>
     </div>
   </div>
 
@@ -590,6 +605,19 @@
           <input type="text" id="deal-f-notes" placeholder="Optional context">
         </div>
       </div>
+      <div class="field-row" id="deal-f-last-stage-row" style="display:none;margin-top:0">
+        <div class="field">
+          <label>Last Active Stage *</label>
+          <select id="deal-f-last-stage">
+            <option value="">— select —</option>
+            <option value="early">Early</option>
+            <option value="ioi">IOI</option>
+            <option value="loi">LOI</option>
+            <option value="dd">DD</option>
+          </select>
+        </div>
+        <div class="field"></div>
+      </div>
       <div class="field-row" style="margin-top:0">
         <div class="field">
           <label>Buyable Revenue ($)</label>
@@ -627,6 +655,34 @@
 
     <div class="form-footer">
       <button class="btn btn-outline" id="digest-cancel">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Theft modal ───────────────────────────────────────────── -->
+<div class="modal-backdrop" id="theft-modal" style="display:none">
+  <div class="modal" style="width:400px">
+    <div class="modal-hdr">
+      <div>
+        <div class="modal-title">Log Theft</div>
+        <div id="theft-modal-sub" style="font-size:11px;color:var(--text-muted);margin-top:2px"></div>
+      </div>
+      <button class="modal-x" id="theft-close">×</button>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Another team contacted this broker. This resets their outreach timer and is tracked as a theft event.</div>
+    <div class="field-row">
+      <div class="field">
+        <label>Date *</label>
+        <input type="date" id="theft-f-date">
+      </div>
+      <div class="field">
+        <label>Notes</label>
+        <input type="text" id="theft-f-notes" placeholder="Which team, context...">
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px">
+      <button class="btn btn-outline" id="theft-cancel">Cancel</button>
+      <button class="btn btn-primary" id="theft-save" style="background:#e85050;border-color:#e85050">Log Theft</button>
     </div>
   </div>
 </div>
@@ -672,10 +728,12 @@ let brokers        = [];
 let thresholds     = Object.assign({}, DEFAULT_THRESH);
 let digestSettings = { emails: [] };
 let dealsBroker    = null;
-let search     = '';
-let filterTier = '';
-let filterSt   = '';
-let filterGeo  = '';
+let search         = '';
+let filterTier     = '';
+let filterSt       = '';
+let filterGeo      = '';
+let filterThefts   = false;
+let filterPipeline = false;
 
 // ── DB mapping ────────────────────────────────────────────────
 function dbToBroker(row) {
@@ -690,6 +748,7 @@ function dbToBroker(row) {
     lastContacted: row.last_contacted || null,
     notes:         row.notes          || '',
     deals:         row.deals          || [],
+    thefts:        row.thefts         || [],
   };
 }
 
@@ -705,6 +764,7 @@ function brokerToDb(b) {
     last_contacted: b.lastContacted || null,
     notes:          b.notes         || null,
     deals:          b.deals         || [],
+    thefts:         b.thefts        || [],
     updated_at:     new Date().toISOString(),
   };
 }
@@ -842,9 +902,11 @@ function render() {
   const q = search.toLowerCase();
   const rows = brokers.filter(b => {
     if (q && !b.name.toLowerCase().includes(q) && !b.firm.toLowerCase().includes(q)) return false;
-    if (filterTier && String(b.tier) !== filterTier) return false;
-    if (filterSt   && statusOf(b) !== filterSt)     return false;
-    if (filterGeo  && b.geography !== filterGeo)    return false;
+    if (filterTier     && String(b.tier) !== filterTier)               return false;
+    if (filterSt       && statusOf(b) !== filterSt)                    return false;
+    if (filterGeo      && b.geography !== filterGeo)                   return false;
+    if (filterThefts   && (b.thefts || []).length === 0)               return false;
+    if (filterPipeline && !(b.deals || []).some(d => ['early','ioi','loi','dd'].includes(d.status))) return false;
     return true;
   });
 
@@ -865,11 +927,22 @@ function render() {
     sum + (b.deals || []).reduce((s, d) =>
       ACTIVE_STAGES.has(d.status) ? s + (Number(d.revenue) || 0) : s, 0), 0);
 
+  const totalThefts = brokers.reduce((sum, b) => sum + (b.thefts || []).length, 0);
+
   document.getElementById('s-total').textContent    = brokers.length;
   document.getElementById('s-overdue').textContent  = counts.overdue;
   document.getElementById('s-soon').textContent     = counts.soon;
   document.getElementById('s-ok').textContent       = counts.fresh;
   document.getElementById('s-pipeline').textContent = pipeline > 0 ? fmtRevenue(pipeline) : '—';
+  document.getElementById('s-thefts').textContent   = totalThefts;
+
+  // sync active stat card highlight
+  document.querySelectorAll('.stat-card').forEach(el => el.classList.remove('stat-active'));
+  if (filterSt === 'overdue')  document.querySelector('.stat-card.s-overdue')?.classList.add('stat-active');
+  if (filterSt === 'soon')     document.querySelector('.stat-card.s-soon')?.classList.add('stat-active');
+  if (filterSt === 'fresh')    document.querySelector('.stat-card.s-ok')?.classList.add('stat-active');
+  if (filterThefts)            document.querySelector('.stat-card.s-theft')?.classList.add('stat-active');
+  if (filterPipeline)          document.querySelector('.stat-card.s-pipeline')?.classList.add('stat-active');
 
   const tbody = document.getElementById('tbody');
   const empty = document.getElementById('empty-state');
@@ -916,6 +989,7 @@ function render() {
         <td>
           <div class="action-cell">
             <button class="btn-row-action" onclick="logToday('${b.id}')">Log Today</button>
+            <button class="btn-row-action" onclick="openTheftModal('${b.id}')">Theft</button>
             <button class="btn-row-action" onclick="openEdit('${b.id}')">Edit</button>
             <button class="btn-row-action btn-del" onclick="deleteBroker('${b.id}')">Del</button>
           </div>
@@ -1136,9 +1210,37 @@ function importCSV(text) {
 }
 
 // ── Search / filters ──────────────────────────────────────────
+function setStatFilter(type) {
+  const wasActive =
+    (type === 'overdue'  && filterSt === 'overdue')  ||
+    (type === 'soon'     && filterSt === 'soon')      ||
+    (type === 'fresh'    && filterSt === 'fresh')     ||
+    (type === 'theft'    && filterThefts)             ||
+    (type === 'pipeline' && filterPipeline);
+
+  filterSt       = '';
+  filterThefts   = false;
+  filterPipeline = false;
+  document.getElementById('filter-status').value = '';
+
+  if (type !== 'total' && !wasActive) {
+    if      (type === 'overdue')  { filterSt = 'overdue'; document.getElementById('filter-status').value = 'overdue'; }
+    else if (type === 'soon')     { filterSt = 'soon';    document.getElementById('filter-status').value = 'soon'; }
+    else if (type === 'fresh')    { filterSt = 'fresh';   document.getElementById('filter-status').value = 'fresh'; }
+    else if (type === 'theft')    { filterThefts   = true; }
+    else if (type === 'pipeline') { filterPipeline = true; }
+  }
+  render();
+}
+
 document.getElementById('search').oninput        = e => { search     = e.target.value; render(); };
 document.getElementById('filter-tier').onchange  = e => { filterTier = e.target.value; render(); };
-document.getElementById('filter-status').onchange= e => { filterSt   = e.target.value; render(); };
+document.getElementById('filter-status').onchange= e => {
+  filterSt = e.target.value;
+  filterThefts = false;
+  filterPipeline = false;
+  render();
+};
 document.getElementById('filter-geo').onchange   = e => { filterGeo  = e.target.value; render(); };
 
 // ── Theme toggle ──────────────────────────────────────────────
@@ -1222,13 +1324,18 @@ function renderDealsList() {
   }
 
   list.innerHTML = deals.map(d => {
-    const rev = fmtRevenue(Number(d.revenue) || 0);
+    const rev       = fmtRevenue(Number(d.revenue) || 0);
+    const isClosed  = d.status === 'closed_won' || d.status === 'closed_lost';
+    const fromLabel = isClosed && d.lastActiveStage
+      ? `<span style="font-size:10px;color:var(--text-muted)">from ${DEAL_LABELS[d.lastActiveStage] || d.lastActiveStage}</span>`
+      : '';
     return `
     <div style="padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap">
           <span style="font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name)}</span>
           <span class="status-badge ${DEAL_CLASS[d.status] || 'ds-early'}" style="font-size:10px;white-space:nowrap">${DEAL_LABELS[d.status] || d.status}</span>
+          ${fromLabel}
           ${rev ? `<span style="font-size:11px;color:var(--accent);font-weight:600">${rev}</span>` : ''}
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
@@ -1255,20 +1362,32 @@ document.getElementById('deals-log-btn').onclick = () => {
 
 document.getElementById('deal-cancel').onclick = () => {
   document.getElementById('deals-add-form').style.display = 'none';
+  document.getElementById('deal-f-last-stage-row').style.display = 'none';
+  document.getElementById('deal-f-last-stage').value = '';
+};
+
+document.getElementById('deal-f-status').onchange = function() {
+  const isClosed = this.value === 'closed_won' || this.value === 'closed_lost';
+  document.getElementById('deal-f-last-stage-row').style.display = isClosed ? '' : 'none';
+  if (!isClosed) document.getElementById('deal-f-last-stage').value = '';
 };
 
 document.getElementById('deal-save').onclick = () => {
   if (!dealsBroker) return;
-  const name    = document.getElementById('deal-f-name').value.trim();
-  const date    = document.getElementById('deal-f-date').value;
-  const status  = document.getElementById('deal-f-status').value;
-  const notes   = document.getElementById('deal-f-notes').value.trim();
-  const revenue = parseFloat(document.getElementById('deal-f-revenue').value) || null;
+  const name            = document.getElementById('deal-f-name').value.trim();
+  const date            = document.getElementById('deal-f-date').value;
+  const status          = document.getElementById('deal-f-status').value;
+  const lastActiveStage = document.getElementById('deal-f-last-stage').value;
+  const notes           = document.getElementById('deal-f-notes').value.trim();
+  const revenue         = parseFloat(document.getElementById('deal-f-revenue').value) || null;
   if (!name) { alert('Deal name is required.'); return; }
   if (!date) { alert('Date is required.'); return; }
+  if ((status === 'closed_won' || status === 'closed_lost') && !lastActiveStage) {
+    alert('Please select the last active stage before closing this deal.'); return;
+  }
 
   if (!dealsBroker.deals) dealsBroker.deals = [];
-  dealsBroker.deals.push({ id: uuid(), name, date, status, notes, revenue });
+  dealsBroker.deals.push({ id: uuid(), name, date, status, lastActiveStage: lastActiveStage || null, notes, revenue });
 
   if (!dealsBroker.lastContacted || date > dealsBroker.lastContacted) {
     dealsBroker.lastContacted = date;
@@ -1276,11 +1395,13 @@ document.getElementById('deal-save').onclick = () => {
 
   saveBroker(dealsBroker); renderDealStats(); renderDealsList(); render();
 
-  document.getElementById('deal-f-name').value    = '';
-  document.getElementById('deal-f-date').value    = new Date().toISOString().slice(0, 10);
-  document.getElementById('deal-f-status').value  = 'early';
-  document.getElementById('deal-f-notes').value   = '';
-  document.getElementById('deal-f-revenue').value = '';
+  document.getElementById('deal-f-name').value          = '';
+  document.getElementById('deal-f-date').value          = new Date().toISOString().slice(0, 10);
+  document.getElementById('deal-f-status').value        = 'early';
+  document.getElementById('deal-f-last-stage').value    = '';
+  document.getElementById('deal-f-last-stage-row').style.display = 'none';
+  document.getElementById('deal-f-notes').value         = '';
+  document.getElementById('deal-f-revenue').value       = '';
   document.getElementById('deals-add-form').style.display = 'none';
 };
 
@@ -1308,6 +1429,7 @@ function openBrokerDetail(id) {
   const won        = deals.filter(d => d.status === 'closed_won');
   const pipeline   = active.reduce((s, d) => s + (Number(d.revenue)||0), 0);
   const wonVal     = won.reduce((s, d) => s + (Number(d.revenue)||0), 0);
+  const thefts     = [...(b.thefts || [])].sort((a, bk) => (bk.date||'').localeCompare(a.date||''));
 
   const miniStat = (label, val, color) => `
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px">
@@ -1318,13 +1440,18 @@ function openBrokerDetail(id) {
   const dealsHtml = deals.length === 0
     ? '<div style="padding:20px 0;text-align:center;color:var(--text-muted);font-size:12px">No deals logged yet.</div>'
     : deals.map(d => {
-        const rev = fmtRevenue(Number(d.revenue)||0);
+        const rev       = fmtRevenue(Number(d.revenue)||0);
+        const isClosed  = d.status === 'closed_won' || d.status === 'closed_lost';
+        const fromLabel = isClosed && d.lastActiveStage
+          ? `<span style="font-size:10px;color:var(--text-muted)">from ${DEAL_LABELS[d.lastActiveStage] || d.lastActiveStage}</span>`
+          : '';
         return `
         <div style="padding:10px 0;border-bottom:1px solid var(--border)">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
             <div style="display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap">
               <span style="font-weight:500;color:var(--text)">${esc(d.name)}</span>
               <span class="status-badge ${DEAL_CLASS[d.status]||'ds-early'}" style="font-size:10px">${DEAL_LABELS[d.status]||d.status}</span>
+              ${fromLabel}
               ${rev ? `<span style="font-size:11px;color:var(--accent);font-weight:600">${rev}</span>` : ''}
             </div>
             <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">${fmtDate(d.date)}</span>
@@ -1349,6 +1476,7 @@ function openBrokerDetail(id) {
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;margin-left:12px">
         <button class="btn btn-outline" onclick="closeBrokerDetail();logToday('${b.id}')">Log Today</button>
+        <button class="btn btn-outline" style="color:var(--red);border-color:rgba(232,80,80,.4)" onclick="closeBrokerDetail();openTheftModal('${b.id}')">Theft</button>
         <button class="btn btn-outline" onclick="closeBrokerDetail();openEdit('${b.id}')">Edit</button>
         <button class="modal-x" onclick="closeBrokerDetail()">×</button>
       </div>
@@ -1375,6 +1503,7 @@ function openBrokerDetail(id) {
       ${miniStat('Active', active.length, 'var(--green)')}
       ${pipeline > 0 ? miniStat('Pipeline', fmtRevenue(pipeline), 'var(--accent)') : ''}
       ${wonVal   > 0 ? miniStat('Won',      fmtRevenue(wonVal),   'var(--green)')  : ''}
+      ${thefts.length > 0 ? miniStat('Thefts', thefts.length, '#e85050') : ''}
     </div>
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -1382,6 +1511,19 @@ function openBrokerDetail(id) {
       <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="closeBrokerDetail();openDealsModal('${b.id}')">+ Log Deal</button>
     </div>
     <div>${dealsHtml}</div>
+
+    ${thefts.length > 0 ? `
+    <div style="margin-top:18px">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#e85050;margin-bottom:8px">Theft History (${thefts.length})</div>
+      ${thefts.map(t => `
+        <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:11px;font-weight:600;color:#e85050;background:rgba(232,80,80,.12);padding:2px 8px;border-radius:3px">Stolen</span>
+            ${t.notes ? `<span style="font-size:11px;color:var(--text-muted)">${esc(t.notes)}</span>` : ''}
+          </div>
+          <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">${fmtDate(t.date)}</span>
+        </div>`).join('')}
+    </div>` : ''}
   `;
 
   document.getElementById('broker-detail-modal').style.display = 'flex';
@@ -1485,6 +1627,46 @@ function closeFirmModal() {
 }
 
 document.getElementById('firm-modal').onclick = e => { if (e.target === e.currentTarget) closeFirmModal(); };
+
+// ── Theft modal ───────────────────────────────────────────────
+let theftBroker = null;
+
+function openTheftModal(id) {
+  theftBroker = brokers.find(x => x.id === id);
+  if (!theftBroker) return;
+  document.getElementById('theft-modal-sub').textContent = theftBroker.name;
+  document.getElementById('theft-f-date').value  = new Date().toISOString().slice(0, 10);
+  document.getElementById('theft-f-notes').value = '';
+  document.getElementById('theft-modal').style.display = 'flex';
+}
+
+function closeTheftModal() {
+  document.getElementById('theft-modal').style.display = 'none';
+  theftBroker = null;
+}
+
+document.getElementById('theft-close').onclick  = closeTheftModal;
+document.getElementById('theft-cancel').onclick = closeTheftModal;
+document.getElementById('theft-modal').onclick  = e => { if (e.target === e.currentTarget) closeTheftModal(); };
+
+document.getElementById('theft-save').onclick = () => {
+  if (!theftBroker) return;
+  const date  = document.getElementById('theft-f-date').value;
+  const notes = document.getElementById('theft-f-notes').value.trim();
+  if (!date) { alert('Date is required.'); return; }
+
+  if (!theftBroker.thefts) theftBroker.thefts = [];
+  theftBroker.thefts.push({ id: uuid(), date, notes });
+
+  if (!theftBroker.lastContacted || date > theftBroker.lastContacted) {
+    theftBroker.lastContacted = date;
+  }
+
+  saveBroker(theftBroker);
+  render();
+  closeTheftModal();
+  toast('Theft logged', 'ok');
+};
 
 // ── Digest modal ──────────────────────────────────────────────
 function openDigestModal() {
